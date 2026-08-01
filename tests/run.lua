@@ -1,0 +1,12 @@
+require("tests.plugin_spec")
+require("tests.config_spec")
+require("tests.cwd_spec")
+require("tests.context_spec")
+require("tests.explorer_spec")
+require("tests.init_spec")
+require("tests.terminal_spec")
+require("tests.app_server_client_spec")
+require("tests.app_server_ui_spec")
+require("tests.app_server_spec")
+
+require("tests.harness").finish()

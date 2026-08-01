@@ -1,0 +1,100 @@
+---@meta
+
+---@alias CodexNvimSplitSide "left"|"right"
+---@alias CodexNvimBackend "terminal"|"app_server"
+---@alias CodexNvimCwdPolicy "root"|"file"|"nvim"|string|fun(ctx: CodexNvimCwdContext): string?
+
+---@class (exact) CodexNvimCwdContext
+---@field bufnr integer
+---@field file? string
+---@field file_dir? string
+---@field nvim_cwd string
+
+---@class (exact) CodexNvimWindowNavigation
+---@field left? string
+---@field down? string
+---@field up? string
+---@field right? string
+
+---@class (exact) CodexNvimTerminalOptions
+---@field split_side? CodexNvimSplitSide
+---@field split_width_percentage? number
+---@field auto_insert? boolean
+---@field auto_close? boolean
+---@field window_navigation? false|CodexNvimWindowNavigation
+
+---@class (exact) CodexNvimContextOptions
+---@field max_lines? integer
+---@field max_bytes? integer
+
+---@class (exact) CodexNvimSetupOptions
+---@field cmd? string[]
+---@field backend? CodexNvimBackend
+---@field env? table<string, string>
+---@field cwd? CodexNvimCwdPolicy
+---@field root_markers? string[]
+---@field focus_after_send? boolean
+---@field terminal? CodexNvimTerminalOptions
+---@field context? CodexNvimContextOptions
+---@field app_server? { cmd?: string[] }
+
+---@class (exact) CodexNvimTerminalConfig
+---@field split_side CodexNvimSplitSide
+---@field split_width_percentage number
+---@field auto_insert boolean
+---@field auto_close boolean
+---@field window_navigation false|CodexNvimWindowNavigation
+
+---@class (exact) CodexNvimContextConfig
+---@field max_lines integer
+---@field max_bytes integer
+
+---@class (exact) CodexNvimConfig
+---@field cmd string[]
+---@field backend CodexNvimBackend
+---@field env table<string, string>
+---@field cwd CodexNvimCwdPolicy
+---@field root_markers string[]
+---@field focus_after_send boolean
+---@field terminal CodexNvimTerminalConfig
+---@field context CodexNvimContextConfig
+---@field app_server { cmd: string[] }
+
+---@class (exact) CodexNvimOpenOptions
+---@field focus? boolean
+---@field argv? string[]
+---@field subcommand? string
+---@field args? string[]
+---@field cwd? string
+---@field keep_open_on_exit? boolean
+
+---@class (exact) CodexNvimShowOptions
+---@field focus? boolean
+
+---@class (exact) CodexNvimSendOptions
+---@field submit? boolean
+
+---@class (exact) CodexNvimStatus
+---@field backend CodexNvimBackend
+---@field running boolean
+---@field visible boolean
+---@field bufnr? integer
+---@field winid? integer
+---@field jobid? integer
+---@field cwd? string
+---@field argv? string[]
+---@field exit_code? integer
+---@field initialized? boolean
+---@field thread_id? string
+---@field turn_id? string
+---@field active? boolean
+
+---@class (exact) CodexNvimContextMetadata
+---@field kind? "file"|"range"|"visual"
+---@field file_path string
+---@field start_line? integer
+---@field end_line? integer
+
+---@class (exact) CodexNvimPathsSent
+---@field paths string[]
+---@field source string

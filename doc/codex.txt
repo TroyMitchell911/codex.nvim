@@ -1,0 +1,183 @@
+*codex.nvim*                   Neovim integration for the OpenAI Codex CLI
+
+==============================================================================
+CONTENTS                                                     *codex-contents*
+
+1. Introduction ................................................. |codex-intro|
+2. Setup ........................................................ |codex-setup|
+3. Commands ................................................... |codex-commands|
+4. Working directory ............................................. |codex-cwd|
+5. Backends ................................................. |codex-backends|
+6. Events ....................................................... |codex-events|
+
+==============================================================================
+1. Introduction                                                 *codex-intro*
+
+codex.nvim is an unofficial, dependency-free integration for the OpenAI Codex
+CLI. It requires Neovim 0.12 or newer and a `codex` executable on $PATH.
+
+The default backend runs the complete Codex TUI in a terminal split. The
+experimental app-server backend renders streamed turns, approvals, and diffs
+with native Neovim UI.
+
+==============================================================================
+2. Setup                                                        *codex-setup*
+
+The defaults are equivalent to: >lua
+
+  require("codex").setup({
+    backend = "terminal",
+    cmd = { "codex" },
+    env = {},
+    cwd = "root",
+    root_markers = { ".git" },
+    focus_after_send = false,
+    terminal = {
+      split_side = "right",
+      split_width_percentage = 0.35,
+      auto_insert = true,
+      auto_close = true,
+      window_navigation = {
+        left = "<M-h>",
+        down = "<M-j>",
+        up = "<M-k>",
+        right = "<M-l>",
+      },
+    },
+    context = {
+      max_lines = 500,
+      max_bytes = 65536,
+    },
+    app_server = {
+      cmd = { "codex", "app-server" },
+    },
+  })
+<
+
+Set `terminal.window_navigation = false` to disable the terminal-local window
+movement mappings.
+
+==============================================================================
+3. Commands                                                  *codex-commands*
+
+                                                        *:Codex*
+:Codex [args...]       Toggle the selected backend, starting Codex if needed.
+
+                                                        *:CodexOpen*
+:CodexOpen [args...]   Open and focus the selected backend.
+
+                                                        *:CodexClose*
+:CodexClose            Hide Codex without stopping its process.
+
+                                                        *:CodexFocus*
+:CodexFocus            Start, reveal, or focus Codex. Hide it when it already
+                       has focus.
+
+                                                        *:CodexStop*
+:CodexStop             Stop the managed Codex process.
+
+                                                        *:CodexResume*
+:CodexResume [--all|session]
+                       Pick or resume a prior session. Without --all, the
+                       picker is limited to the resolved working directory.
+                       Pickers use app-server thread/list even when the
+                       terminal backend is selected. A session ID goes to the
+                       terminal CLI directly.
+
+                                                        *:CodexContinue*
+:CodexContinue         Resume the most recent session.
+
+                                                        *:CodexFork*
+:CodexFork [--all|session]
+                       Pick or fork a prior session. The same app-server picker
+                       behavior as |:CodexResume| applies.
+
+                                                        *:CodexReview*
+:CodexReview [target]  Review uncommitted changes by default. Targets include
+                       --base BRANCH, --commit SHA, or custom instructions.
+
+                                                        *:CodexImage*
+:CodexImage {paths...} Start a session or turn with local image files.
+
+                                                        *:CodexPrompt*
+:CodexPrompt [text]    Send a prompt. Uses |vim.ui.input()| when omitted.
+
+                                                        *:CodexSend*
+:[range]CodexSend      Send complete lines with file/range context.
+
+                                                        *:CodexSendVisual*
+:'<,'>CodexSendVisual  Send an exact character, line, or block selection.
+
+                                                        *:CodexAdd*
+:CodexAdd [path]       Insert an @path reference without submitting.
+
+                                                        *:CodexTreeAdd*
+:[range]CodexTreeAdd   Insert selected paths from a supported explorer.
+
+                                                        *:CodexSendText*
+:CodexSendText[!] {text}
+                       Send text. With !, insert without submitting.
+
+                                                        *:CodexDiff*
+:CodexDiff             Open the latest app-server diff.
+
+                                                        *:CodexInterrupt*
+:CodexInterrupt        Interrupt the active app-server turn.
+
+                                                        *:CodexStatus*
+:CodexStatus           Report backend, process, cwd, and thread status.
+
+                                                        *:CodexHealth*
+:CodexHealth           Run |:checkhealth| for codex.nvim.
+
+==============================================================================
+4. Working directory                                            *codex-cwd*
+
+The cwd is resolved from the buffer active when a session starts and remains
+fixed for that session.
+
+  "root"   Nearest `root_markers` entry from the active file. Falls back to
+           the file directory, then Neovim's cwd.
+  "file"   Active file's directory.
+  "nvim"   Neovim's current working directory.
+  path     A fixed directory path.
+  function(ctx)
+           A callback returning a directory. ctx contains `bufnr`, `file`,
+           `file_dir`, and `nvim_cwd`.
+
+==============================================================================
+5. Backends                                                *codex-backends*
+
+TERMINAL BACKEND                                      *codex-backend-terminal*
+
+The default and recommended backend. It runs the complete interactive Codex
+TUI. Hiding its split preserves the terminal process. Argument-free resume and
+fork pickers use app-server; provide a session ID for a CLI-only path.
+
+APP-SERVER BACKEND                                  *codex-backend-app-server*
+
+Enable with `backend = "app_server"`. It starts `codex app-server` over stdio
+JSONL and renders a Markdown transcript, approvals through |vim.ui.select()|,
+plans, command output, and diffs. The upstream app-server API is experimental
+and may change between Codex CLI releases.
+
+==============================================================================
+6. Events                                                      *codex-events*
+
+The following |User| autocmd patterns are emitted. Event-specific payloads are
+available through `event.data`.
+
+  CodexStarted             Terminal process started.
+  CodexExited              Terminal process exited.
+  CodexOpened              Hidden terminal became visible.
+  CodexClosed              Terminal window was hidden.
+  CodexContextSent         File, range, or selection context was sent.
+  CodexPathsSent           One or more paths were sent.
+  CodexAppServerReady      App-server initialization completed.
+  CodexAppServerExited     App-server process exited.
+  CodexThreadStarted       App-server thread started.
+  CodexTurnStarted         App-server turn started.
+  CodexTurnCompleted       App-server turn completed.
+  CodexDiffUpdated         App-server diff changed.
+
+vim:tw=78:ts=8:noet:ft=help:norl:
