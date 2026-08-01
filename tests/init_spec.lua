@@ -22,14 +22,16 @@ h.test("add_paths sends one composer update and emits normalized context", funct
   vim.fn.writefile({}, second)
   local canonical_first = vim.uv.fs_realpath(first)
   local canonical_second = vim.uv.fs_realpath(second)
+  local expected_first = require("codex.cwd").relative(canonical_first, "/tmp")
+  local expected_second = require("codex.cwd").relative(canonical_second, "/tmp")
   local ok = codex.add_paths({ first, second }, "test")
 
   package.loaded["codex.terminal"] = original_terminal
   vim.fn.delete(first)
   vim.fn.delete(second)
   h.truthy(ok)
-  h.contains(sent.text, "@" .. canonical_first)
-  h.contains(sent.text, "@" .. canonical_second)
+  h.contains(sent.text, "@" .. expected_first)
+  h.contains(sent.text, "@" .. expected_second)
   h.eq(false, sent.opts.submit)
 end)
 

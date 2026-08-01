@@ -25,9 +25,9 @@ function M._normalize_paths(paths)
   return normalized
 end
 
----@param bufnr integer
----@param first_line? integer
----@param last_line? integer
+---@param _bufnr integer
+---@param _first_line? integer
+---@param _last_line? integer
 ---@return string[]? paths
 ---@return string? error
 local function nvim_tree(_bufnr, _first_line, _last_line)
@@ -48,7 +48,7 @@ local function nvim_tree(_bufnr, _first_line, _last_line)
   return paths
 end
 
----@param bufnr integer
+---@param _bufnr integer
 ---@param first_line? integer
 ---@param last_line? integer
 ---@return string[]? paths

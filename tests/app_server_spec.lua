@@ -124,8 +124,10 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
     turnId = "turn-1",
     itemId = "file-item",
   }, 90)
+  h.truthy(type(diff) == "string")
+  ---@cast diff string
   h.contains(diff, "diff --git a/a.lua")
-  h.eq(false, diff:find("diff --git a/a b/a", 1, true) ~= nil)
+  h.eq(nil, diff:find("diff --git a/a b/a", 1, true))
 
   server_request_handler("item/commandExecution/requestApproval", {
     threadId = "thread-1",

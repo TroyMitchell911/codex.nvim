@@ -35,10 +35,14 @@ end)
 h.test("config validates cwd and terminal navigation", function()
   config._reset()
   h.raises("cwd", function()
-    config.setup({ cwd = 42 })
+    local invalid = { cwd = 42 }
+    ---@cast invalid any
+    config.setup(invalid)
   end)
   h.raises("backend", function()
-    config.setup({ backend = "unknown" })
+    local invalid = { backend = "unknown" }
+    ---@cast invalid any
+    config.setup(invalid)
   end)
   h.raises("terminal.window_navigation.left", function()
     config.setup({ terminal = { window_navigation = { left = "" } } })
