@@ -11,10 +11,18 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
   local diff
   local cwd_calls = 0
   local ui_open_ok = true
+  local client_start_ok = true
+  local client_running = false
+  local thread_start_error = false
+  local ui_open_focuses = {}
   local sequence = {}
   local responses = {}
   local fake_client = {
     start = function(opts)
+      if not client_start_ok then
+        return false
+      end
+      client_running = true
       client_exit_handler = opts.on_exit
       opts.on_ready()
       return true
@@ -22,9 +30,17 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
     request = function(method, params, callback)
       table.insert(requests, { method = method, params = params })
       if method == "thread/start" then
-        callback({ thread = { id = "thread-1" }, cwd = params.cwd })
+        if thread_start_error then
+          callback(nil, { message = "thread rejected" })
+        else
+          callback({ thread = { id = "thread-1" }, cwd = params.cwd })
+        end
       elseif method == "turn/start" then
         turn_callback = callback
+      elseif method == "turn/steer" then
+        if callback then
+          callback({}, nil)
+        end
       elseif method == "review/start" then
         review_callback = callback
       end
@@ -37,12 +53,13 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
       server_request_handler = handler
     end,
     is_running = function()
-      return true
+      return client_running
     end,
     status = function()
       return { running = true, initialized = true, jobid = 71 }
     end,
     stop = function()
+      client_running = false
       return true
     end,
     respond = function(id, result, err)
@@ -50,8 +67,9 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
     end,
   }
   local fake_ui = {
-    open = function()
+    open = function(focus)
       table.insert(sequence, "ui")
+      table.insert(ui_open_focuses, focus)
       return ui_open_ok
     end,
     hide = function() end,
@@ -77,6 +95,7 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
 
   require("codex.config").setup({
     backend = "app_server",
+    focus_after_send = true,
     cwd = function()
       cwd_calls = cwd_calls + 1
       table.insert(sequence, "cwd")
@@ -87,12 +106,19 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
   h.truthy(app.open())
   h.eq({ "cwd", "ui" }, sequence)
   h.eq("thread/start", requests[1].method)
+  h.truthy(app.send("@lua/codex/init.lua ", { submit = false }))
+  h.eq(true, ui_open_focuses[#ui_open_focuses])
+  h.contains(appended[#appended], "> Draft: @lua/codex/init.lua ")
   h.truthy(app.send("hello"))
   h.eq("turn/start", requests[2].method)
-  h.eq("hello", requests[2].params.input[1].text)
-  h.truthy(app.send("follow up"))
+  h.eq("@lua/codex/init.lua hello", requests[2].params.input[1].text)
+  local original_notify = vim.notify
+  rawset(vim, "notify", function() end)
+  h.eq(false, app.send("too early"))
+  rawset(vim, "notify", original_notify)
   h.eq(2, #requests)
   turn_callback({ turn = { id = "turn-1" } })
+  h.truthy(app.send("follow up"))
   h.eq("turn/steer", requests[3].method)
   h.eq("follow up", requests[3].params.input[1].text)
   h.eq(1, cwd_calls)
@@ -151,7 +177,7 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
     delta = "stale",
   })
   h.eq(appended_before, #appended)
-  local original_notify = vim.notify
+  original_notify = vim.notify
   rawset(vim, "notify", function() end)
   h.eq(false, app.resume_thread("another-thread"))
   rawset(vim, "notify", original_notify)
@@ -179,14 +205,110 @@ h.test("app-server backend starts a thread, sends a turn, and streams UI updates
     threadId = "thread-1",
     turn = { id = "review-turn", status = "completed" },
   })
+  ui_open_ok = true
+  h.truthy(app.send("@retry ", { submit = false }))
   ui_open_ok = false
   local requests_before = #requests
+  local failed_completion
   original_notify = vim.notify
   rawset(vim, "notify", function() end)
-  h.truthy(app.send("must not be sent without a panel"))
+  h.eq(
+    false,
+    app.send("first", {
+      on_complete = function(ok)
+        failed_completion = ok
+      end,
+    })
+  )
   rawset(vim, "notify", original_notify)
   h.eq(requests_before, #requests)
+  h.eq(false, failed_completion)
 
+  ui_open_ok = true
+  local successful_completion
+  h.truthy(app.send("second", {
+    on_complete = function(ok)
+      successful_completion = ok
+    end,
+  }))
+  h.eq("turn/start", requests[#requests].method)
+  h.eq("@retry second", requests[#requests].params.input[1].text)
+  turn_callback({ turn = { id = "turn-2" } })
+  h.eq(true, successful_completion)
+
+  notification_handler("turn/completed", {
+    threadId = "thread-1",
+    turn = { id = "turn-2", status = "completed" },
+  })
+  h.truthy(app.send("@turn-failure ", { submit = false }))
+  local rejected_completion
+  h.truthy(app.send("first", {
+    on_complete = function(ok)
+      rejected_completion = ok
+    end,
+  }))
+  original_notify = vim.notify
+  rawset(vim, "notify", function() end)
+  turn_callback(nil, { message = "turn rejected" })
+  rawset(vim, "notify", original_notify)
+  h.eq(false, rejected_completion)
+  h.truthy(app.send("second"))
+  h.eq("@turn-failure second", requests[#requests].params.input[1].text)
+  turn_callback({ turn = { id = "turn-3" } })
+  notification_handler("turn/completed", {
+    threadId = "thread-1",
+    turn = { id = "turn-3", status = "completed" },
+  })
+
+  client_running = false
+  client_exit_handler(1)
+  h.truthy(app.send("@client-failure ", { submit = false }))
+  client_start_ok = false
+  local client_completion
+  original_notify = vim.notify
+  rawset(vim, "notify", function() end)
+  h.eq(
+    false,
+    app.send("first", {
+      on_complete = function(ok)
+        client_completion = ok
+      end,
+    })
+  )
+  rawset(vim, "notify", original_notify)
+  h.eq(false, client_completion)
+  client_start_ok = true
+  h.truthy(app.send("second"))
+  h.eq("@client-failure second", requests[#requests].params.input[1].text)
+  turn_callback({ turn = { id = "turn-4" } })
+  notification_handler("turn/completed", {
+    threadId = "thread-1",
+    turn = { id = "turn-4", status = "completed" },
+  })
+
+  client_running = false
+  client_exit_handler(1)
+  h.truthy(app.send("@thread-failure ", { submit = false }))
+  thread_start_error = true
+  local thread_completion
+  original_notify = vim.notify
+  rawset(vim, "notify", function() end)
+  h.eq(
+    false,
+    app.send("first", {
+      on_complete = function(ok)
+        thread_completion = ok
+      end,
+    })
+  )
+  rawset(vim, "notify", original_notify)
+  h.eq(false, thread_completion)
+  thread_start_error = false
+  h.truthy(app.send("second"))
+  h.eq("@thread-failure second", requests[#requests].params.input[1].text)
+  turn_callback({ turn = { id = "turn-5" } })
+
+  client_running = false
   client_exit_handler(1)
   h.eq(false, app.status().active)
   h.eq(nil, app.status().thread_id)

@@ -46,3 +46,67 @@ h.test("app-server UI cleans up a failed diff split", function()
   )
   ui.reset()
 end)
+
+h.test("app-server UI restores the most recent editor window", function()
+  ui.reset()
+  config.setup({ terminal = { auto_insert = false } })
+  local original_win = vim.api.nvim_get_current_win()
+  vim.cmd("vsplit")
+  local recent_editor_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_set_current_win(original_win)
+
+  h.truthy(ui.open(false))
+  vim.api.nvim_set_current_win(recent_editor_win)
+  h.truthy(ui.open(true))
+  h.truthy(ui.hide())
+  h.eq(recent_editor_win, vim.api.nvim_get_current_win())
+
+  ui.reset()
+  if vim.api.nvim_win_is_valid(recent_editor_win) then
+    vim.api.nvim_win_close(recent_editor_win, true)
+  end
+end)
+
+h.test("app-server UI does not treat its diff as an editor return window", function()
+  ui.reset()
+  config.setup({ terminal = { auto_insert = false } })
+  local older_editor_win = vim.api.nvim_get_current_win()
+
+  h.truthy(ui.open(false))
+  vim.cmd("vsplit")
+  local recent_editor_win = vim.api.nvim_get_current_win()
+  h.truthy(ui.show_diff("diff --git a/a.lua b/a.lua\n+new"))
+  h.truthy(ui.open(true))
+  h.truthy(ui.hide())
+  h.eq(recent_editor_win, vim.api.nvim_get_current_win())
+
+  ui.reset()
+  if vim.api.nvim_win_is_valid(recent_editor_win) then
+    vim.api.nvim_win_close(recent_editor_win, true)
+  end
+  h.eq(older_editor_win, vim.api.nvim_get_current_win())
+end)
+
+h.test("app-server UI hides transcript views across tabs", function()
+  ui.reset()
+  config.setup({ terminal = { auto_insert = false } })
+  local original_tab = vim.api.nvim_get_current_tabpage()
+  local editor_win = vim.api.nvim_get_current_win()
+  h.truthy(ui.open(false))
+  local bufnr = ui.status().bufnr
+  h.truthy(bufnr)
+  ---@cast bufnr integer
+
+  vim.cmd("tabnew")
+  local extra_tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_buf(0, bufnr)
+  h.eq(2, #vim.fn.win_findbuf(bufnr))
+  h.truthy(ui.hide())
+  h.eq(0, #vim.fn.win_findbuf(bufnr))
+  h.eq(editor_win, vim.api.nvim_get_current_win())
+
+  vim.api.nvim_set_current_tabpage(extra_tab)
+  vim.cmd("tabclose")
+  h.eq(original_tab, vim.api.nvim_get_current_tabpage())
+  ui.reset()
+end)

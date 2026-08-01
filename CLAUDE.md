@@ -14,8 +14,10 @@ Codex CLI を Neovim から操作し、現在のファイル・選択範囲・ex
 - `lua/codex/app_server/client.lua` だけが app-server process と JSONL RPC を所有する。
 - 外部 command は shell 文字列ではなく argv 配列で起動する。
 - window を閉じても process は維持し、`:CodexStop` だけが明示停止する。
+- panel を内側から隠した時は、直前に使っていた editor window へ戻す。
 - cwd は session 開始元 buffer から一度だけ解決し、実行中に暗黙変更しない。
 - editor context は行数・byte 数の上限を超えたら切り詰めず拒否する。
+- 直近の context は path・行範囲・cwd・insert/submit の metadata だけを session 中に保持する。
 - explorer 連携は optional adapter とし、runtime dependency を追加しない。
 - 複数同時 session、独自 transcript 永続化、Windows 対応は範囲外。
 
@@ -24,6 +26,15 @@ Codex CLI を Neovim から操作し、現在のファイル・選択範囲・ex
 ```sh
 make check
 make integration # installed Codex CLI を使う任意の実機確認
+lua-language-server --check=. --checklevel=Warning --configpath=.luarc.json --check_format=pretty
 ```
 
 個別には `make test`、`make fmt-check`、`make lint` を使用する。
+
+## Commit gate
+
+- commit 前に、CI と同じ StyLua、Luacheck、headless test を含む `make check` を成功させる。
+- Lua の型や public annotation を変更した時は、`.luarc.json` を使う LuaLS 型診断もローカルで確認する。
+- `.github/workflows/` を変更した時は `actionlint` を実行する。
+- app-server process、JSONL、thread lifecycle を変更した時は、Codex CLI を使う `make integration` も実行する。
+- 検証を省略したまま「CIで通る」と判断しない。実行できない項目があれば、commit前に理由を明示する。

@@ -7,14 +7,18 @@ h.test("reports the release version", function()
 end)
 
 h.test("add_paths sends one composer update and emits normalized context", function()
+  codex._reset()
   local sent
   local original_terminal = package.loaded["codex.terminal"]
   package.loaded["codex.terminal"] = {
     status = function()
-      return { cwd = "/tmp", running = true }
+      return { backend = "terminal", cwd = "/tmp", running = true, visible = false, jobid = 42 }
     end,
     send = function(text, opts)
       sent = { text = text, opts = opts }
+      if opts.on_complete then
+        opts.on_complete(true)
+      end
       return true
     end,
   }
@@ -29,6 +33,7 @@ h.test("add_paths sends one composer update and emits normalized context", funct
   local expected_first = require("codex.cwd").relative(canonical_first, "/tmp")
   local expected_second = require("codex.cwd").relative(canonical_second, "/tmp")
   local ok = codex.add_paths({ first, second }, "test")
+  local status = codex.status()
 
   package.loaded["codex.terminal"] = original_terminal
   vim.fn.delete(first)
@@ -37,6 +42,112 @@ h.test("add_paths sends one composer update and emits normalized context", funct
   h.contains(sent.text, "@" .. expected_first)
   h.contains(sent.text, "@" .. expected_second)
   h.eq(false, sent.opts.submit)
+  local receipt = status.last_context
+  h.truthy(receipt)
+  h.eq("files", receipt.kind)
+  h.eq({ expected_first, expected_second }, receipt.paths)
+  h.eq("/tmp", receipt.cwd)
+  h.eq("test", receipt.source)
+  h.eq(false, receipt.submitted)
+  h.contains(codex.status_message(status), "last context: files")
+  h.contains(codex.status_message(status), "inserted (cwd /tmp)")
+  codex._reset()
+end)
+
+h.test("status resolves the next cwd while Codex is stopped", function()
+  codex._reset()
+  local original_terminal = package.loaded["codex.terminal"]
+  package.loaded["codex.terminal"] = {
+    status = function()
+      return { backend = "terminal", running = false, visible = false }
+    end,
+  }
+  config.setup({ cwd = "nvim" })
+
+  local status = codex.status()
+
+  package.loaded["codex.terminal"] = original_terminal
+  h.eq(vim.uv.cwd(), status.resolved_cwd)
+  h.contains(codex.status_message(status), "terminal stopped (next cwd ")
+end)
+
+h.test("context status distinguishes submitted selections from inserted files", function()
+  local message = require("codex.receipt").format_context({
+    kind = "visual",
+    file_path = "lua/codex/init.lua",
+    start_line = 10,
+    end_line = 12,
+    cwd = "/tmp/codex.nvim",
+    source = "visual",
+    submitted = true,
+  })
+  h.eq("visual @lua/codex/init.lua:10-12, submitted (cwd /tmp/codex.nvim)", message)
+end)
+
+h.test("range sends record a submitted context receipt", function()
+  codex._reset()
+  local sent
+  local original_terminal = package.loaded["codex.terminal"]
+  package.loaded["codex.terminal"] = {
+    status = function()
+      return { backend = "terminal", cwd = "/tmp", running = true, visible = true, jobid = 43 }
+    end,
+    send = function(text, opts)
+      sent = text
+      if opts.on_complete then
+        opts.on_complete(true)
+      end
+      return true
+    end,
+  }
+  config.setup({ cwd = "nvim" })
+  local bufnr = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(bufnr, "/tmp/context-receipt.lua")
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "local one = 1", "local two = 2" })
+
+  h.truthy(codex.send_range(1, 2, bufnr))
+  local status = codex.status()
+
+  package.loaded["codex.terminal"] = original_terminal
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+  h.contains(sent, "lines 1-2")
+  local receipt = status.last_context
+  h.truthy(receipt)
+  ---@cast receipt CodexNvimContextReceipt
+  h.eq("range", receipt.kind)
+  h.eq("context-receipt.lua", receipt.file_path)
+  h.eq(true, receipt.submitted)
+  codex._reset()
+end)
+
+h.test("failed context delivery does not record a receipt", function()
+  codex._reset()
+  local completion
+  local original_terminal = package.loaded["codex.terminal"]
+  package.loaded["codex.terminal"] = {
+    status = function()
+      return { backend = "terminal", cwd = "/tmp", running = true, visible = true, jobid = 44 }
+    end,
+    send = function(_, opts)
+      completion = opts.on_complete
+      return true
+    end,
+  }
+  config.setup({ cwd = "nvim" })
+  local bufnr = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(bufnr, "/tmp/failed-context-receipt.lua")
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "return false" })
+
+  h.truthy(codex.send_range(1, 1, bufnr))
+  h.eq(nil, codex.status().last_context)
+  h.truthy(completion)
+  ---@cast completion fun(ok: boolean)
+  completion(false)
+  h.eq(nil, codex.status().last_context)
+
+  package.loaded["codex.terminal"] = original_terminal
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+  codex._reset()
 end)
 
 h.test("review arguments map to app-server review targets", function()

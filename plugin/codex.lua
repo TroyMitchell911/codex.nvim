@@ -85,21 +85,7 @@ vim.api.nvim_create_user_command("CodexSendText", function(opts)
 end, { nargs = "+", bang = true, desc = "Send text to Codex; bang inserts without submitting" })
 
 vim.api.nvim_create_user_command("CodexStatus", function()
-  local status = codex().status()
-  local message = "stopped"
-  if status.running then
-    message = string.format(
-      "%s running, %s (job %s, cwd %s)",
-      status.backend,
-      status.visible and "visible" or "hidden",
-      tostring(status.jobid),
-      tostring(status.cwd)
-    )
-    if status.thread_id then
-      message = message .. ", thread " .. status.thread_id
-    end
-  end
-  vim.notify("codex.nvim: " .. message, vim.log.levels.INFO)
+  vim.notify("codex.nvim: " .. codex().status_message(), vim.log.levels.INFO)
 end, { desc = "Show Codex backend status" })
 
 vim.api.nvim_create_user_command("CodexHealth", function()

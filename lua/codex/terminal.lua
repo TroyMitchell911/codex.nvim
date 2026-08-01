@@ -1,6 +1,17 @@
 local M = {}
 
----@type { bufnr: integer?, winid: integer?, jobid: integer?, cwd: string?, argv: string[]?, close_on_exit: boolean? }
+local window = require("codex.window")
+
+---@class (exact) CodexNvimTerminalState
+---@field bufnr? integer
+---@field winid? integer
+---@field jobid? integer
+---@field cwd? string
+---@field argv? string[]
+---@field close_on_exit? boolean
+---@field return_winid? integer
+
+---@type CodexNvimTerminalState
 local state = {
   bufnr = nil,
   winid = nil,
@@ -8,6 +19,7 @@ local state = {
   cwd = nil,
   argv = nil,
   close_on_exit = nil,
+  return_winid = nil,
 }
 
 ---@return CodexNvimConfig
@@ -137,34 +149,12 @@ local function clear_state()
   state.cwd = nil
   state.argv = nil
   state.close_on_exit = nil
-end
-
----@param bufnr integer
----@return boolean ok
----@return unknown? error
-local function hide_buffer_windows(bufnr)
-  local replacement
-  for _, winid in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(winid) and vim.api.nvim_win_get_buf(winid) == bufnr then
-      local tabpage = vim.api.nvim_win_get_tabpage(winid)
-      local ok, err
-      if #vim.api.nvim_tabpage_list_wins(tabpage) == 1 then
-        replacement = replacement or vim.api.nvim_create_buf(true, false)
-        ok, err = pcall(vim.api.nvim_win_set_buf, winid, replacement)
-      else
-        ok, err = pcall(vim.api.nvim_win_close, winid, false)
-      end
-      if not ok then
-        return false, err
-      end
-    end
-  end
-  return true
+  state.return_winid = nil
 end
 
 ---@param bufnr integer
 local function cleanup_failed_start(bufnr)
-  hide_buffer_windows(bufnr)
+  window.hide_buffer_windows(bufnr)
   if vim.api.nvim_buf_is_valid(bufnr) then
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end
@@ -182,10 +172,15 @@ local function handle_exit(exited_jobid, exit_code)
     exited_status.exit_code = exit_code
     local exited_bufnr = state.bufnr
     local close_on_exit = state.close_on_exit ~= false
+    local return_winid = state.return_winid
+    local restore_focus = exited_bufnr ~= nil and vim.api.nvim_win_get_buf(0) == exited_bufnr
     clear_state()
     if close_on_exit and config().terminal.auto_close and exited_bufnr and vim.api.nvim_buf_is_valid(exited_bufnr) then
-      hide_buffer_windows(exited_bufnr)
+      window.hide_buffer_windows(exited_bufnr)
       pcall(vim.api.nvim_buf_delete, exited_bufnr, { force = true })
+      if restore_focus then
+        window.restore(return_winid, exited_bufnr)
+      end
     end
     emit("CodexExited", exited_status)
   end)
@@ -223,6 +218,7 @@ function M.show(opts)
   if not valid_buffer() or not M.is_running() then
     return false
   end
+  state.return_winid = window.remember(state.return_winid, state.bufnr)
   local winid = find_window()
   local reopened = winid == nil
   if not winid then
@@ -261,6 +257,7 @@ function M.open(opts)
   end
 
   local original_win = vim.api.nvim_get_current_win()
+  state.return_winid = original_win
   local source_bufnr = vim.api.nvim_win_get_buf(original_win)
   local bufnr = vim.api.nvim_create_buf(false, true)
   state.bufnr = bufnr
@@ -328,12 +325,16 @@ function M.hide()
   if not valid_buffer() or not find_window() then
     return true
   end
-  local ok, err = hide_buffer_windows(state.bufnr)
+  local restore_focus = vim.api.nvim_win_get_buf(0) == state.bufnr
+  local ok, err = window.hide_buffer_windows(state.bufnr)
   if not ok then
     notify("could not hide terminal: " .. tostring(err), vim.log.levels.ERROR)
     return false
   end
   state.winid = nil
+  if restore_focus then
+    window.restore(state.return_winid, state.bufnr)
+  end
   emit("CodexClosed", M.status())
   return true
 end
@@ -410,6 +411,9 @@ function M.send(text, opts)
   end
   if config().focus_after_send then
     M.show({ focus = true })
+  end
+  if opts.on_complete then
+    opts.on_complete(true)
   end
   return true
 end

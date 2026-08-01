@@ -73,6 +73,7 @@
 
 ---@class (exact) CodexNvimSendOptions
 ---@field submit? boolean
+---@field on_complete? fun(ok: boolean)
 
 ---@class (exact) CodexNvimStatus
 ---@field backend CodexNvimBackend
@@ -82,19 +83,44 @@
 ---@field winid? integer
 ---@field jobid? integer
 ---@field cwd? string
+---@field resolved_cwd? string
 ---@field argv? string[]
 ---@field exit_code? integer
 ---@field initialized? boolean
 ---@field thread_id? string
 ---@field turn_id? string
 ---@field active? boolean
+---@field last_context? CodexNvimContextReceipt
 
 ---@class (exact) CodexNvimContextMetadata
 ---@field kind? "file"|"range"|"visual"
 ---@field file_path string
 ---@field start_line? integer
 ---@field end_line? integer
+---@field cwd? string
+---@field source? string
+---@field submitted? boolean
+
+---@alias CodexNvimContextReceipt CodexNvimSingleContextReceipt|CodexNvimFilesContextReceipt
+
+---@class (exact) CodexNvimSingleContextReceipt
+---@field kind "file"|"range"|"visual"
+---@field file_path string
+---@field start_line? integer
+---@field end_line? integer
+---@field cwd string
+---@field source string
+---@field submitted boolean
+
+---@class (exact) CodexNvimFilesContextReceipt
+---@field kind "files"
+---@field paths string[]
+---@field cwd string
+---@field source string
+---@field submitted boolean
 
 ---@class (exact) CodexNvimPathsSent
 ---@field paths string[]
 ---@field source string
+---@field cwd string
+---@field submitted boolean

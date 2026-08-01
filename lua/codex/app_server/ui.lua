@@ -1,9 +1,12 @@
 local M = {}
 
+local window = require("codex.window")
+
 local state = {
   bufnr = nil,
   winid = nil,
   diff_bufnr = nil,
+  return_winid = nil,
 }
 
 local function notify(message)
@@ -80,6 +83,7 @@ end
 ---@param focus? boolean
 ---@return boolean
 function M.open(focus)
+  state.return_winid = window.remember(state.return_winid, state.bufnr, state.diff_bufnr)
   local created = false
   if not valid_buffer(state.bufnr) then
     state.bufnr = create_buffer()
@@ -114,14 +118,16 @@ function M.hide()
   if not state.winid then
     return true
   end
-  local tabpage = vim.api.nvim_win_get_tabpage(state.winid)
-  if #vim.api.nvim_tabpage_list_wins(tabpage) == 1 then
-    local replacement = vim.api.nvim_create_buf(true, false)
-    vim.api.nvim_win_set_buf(state.winid, replacement)
-  else
-    vim.api.nvim_win_close(state.winid, false)
+  local restore_focus = vim.api.nvim_win_get_buf(0) == state.bufnr
+  local ok, err = window.hide_buffer_windows(state.bufnr)
+  if not ok then
+    notify("could not hide app-server panel: " .. tostring(err))
+    return false
   end
   state.winid = nil
+  if restore_focus then
+    window.restore(state.return_winid, state.bufnr, state.diff_bufnr)
+  end
   return true
 end
 
@@ -163,6 +169,7 @@ end
 
 ---@param diff string
 function M.show_diff(diff)
+  state.return_winid = window.remember(state.return_winid, state.bufnr, state.diff_bufnr)
   if valid_buffer(state.diff_bufnr) then
     pcall(vim.api.nvim_buf_delete, state.diff_bufnr, { force = true })
   end
@@ -205,6 +212,7 @@ function M.reset()
   state.bufnr = nil
   state.winid = nil
   state.diff_bufnr = nil
+  state.return_winid = nil
 end
 
 return M

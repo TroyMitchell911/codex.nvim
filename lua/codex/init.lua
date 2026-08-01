@@ -6,6 +6,10 @@ local function config()
   return require("codex.config").get()
 end
 
+local function receipts()
+  return require("codex.receipt")
+end
+
 local function backend()
   if config().backend == "app_server" then
     return require("codex.app_server")
@@ -30,41 +34,57 @@ local function working_directory()
 end
 
 ---@param kind "file"|"range"|"visual"
----@param metadata CodexNvimContextMetadata
+---@param metadata CodexNvimContextMetadata|CodexNvimSingleContextReceipt
 local function emit_context(kind, metadata)
-  metadata.kind = kind
+  local data = vim.deepcopy(metadata)
+  data.kind = kind
   pcall(vim.api.nvim_exec_autocmds, "User", {
     pattern = "CodexContextSent",
     modeline = false,
-    data = metadata,
+    data = data,
   })
 end
 
 ---@param paths string[]
 ---@param source string
-local function emit_paths(paths, source)
+---@param cwd string
+local function emit_paths(paths, source, cwd)
   pcall(vim.api.nvim_exec_autocmds, "User", {
     pattern = "CodexPathsSent",
     modeline = false,
-    data = { paths = paths, source = source },
+    data = { paths = paths, source = source, cwd = cwd, submitted = false },
   })
 end
 
 ---@param prompt string?
 ---@param metadata CodexNvimContextMetadata|string
 ---@param kind "file"|"range"|"visual"
+---@param cwd string
 ---@return boolean
-local function send_context(prompt, metadata, kind)
+local function send_context(prompt, metadata, kind, cwd)
   if not prompt then
     notify(tostring(metadata), vim.log.levels.ERROR)
     return false
   end
-  if not backend().send(prompt) then
-    return false
-  end
   ---@cast metadata CodexNvimContextMetadata
-  emit_context(kind, metadata)
-  return true
+  ---@type CodexNvimSingleContextReceipt
+  local receipt = vim.tbl_extend("force", vim.deepcopy(metadata), {
+    kind = kind,
+    cwd = cwd,
+    source = kind,
+    submitted = true,
+  })
+  local completed = false
+  local sent = backend().send(prompt, {
+    on_complete = function(ok)
+      if ok and not completed then
+        completed = true
+        receipts().remember(receipt, backend().status())
+        emit_context(kind, receipt)
+      end
+    end,
+  })
+  return sent
 end
 
 ---@param args? string[]
@@ -102,7 +122,9 @@ function M.focus()
 end
 
 function M.stop()
-  return backend().stop()
+  local stopped = backend().stop()
+  receipts().clear()
+  return stopped
 end
 
 ---@param subcommand? "resume"|"fork"|"review"
@@ -115,11 +137,15 @@ local function open_subcommand(subcommand, args, keep_open_on_exit)
     notify("stop the active session before starting another Codex command", vim.log.levels.WARN)
     return false
   end
-  return terminal.open({
+  local opened = terminal.open({
     subcommand = subcommand,
     args = args or {},
     keep_open_on_exit = keep_open_on_exit,
   })
+  if opened then
+    receipts().clear()
+  end
+  return opened
 end
 
 ---@param thread table
@@ -158,9 +184,17 @@ local function pick_thread(action, all)
         app.stop()
         open_subcommand(action, { choice.id })
       elseif action == "resume" then
-        app.resume_thread(choice.id)
+        app.resume_thread(choice.id, function(ok)
+          if ok then
+            receipts().clear()
+          end
+        end)
       else
-        app.fork_thread(choice.id)
+        app.fork_thread(choice.id, function(ok)
+          if ok then
+            receipts().clear()
+          end
+        end)
       end
     end)
   end, all)
@@ -174,7 +208,11 @@ function M.resume(args)
     return pick_thread("resume", args[1] == "--all")
   end
   if config().backend == "app_server" then
-    return require("codex.app_server").resume_thread(args[1])
+    return require("codex.app_server").resume_thread(args[1], function(ok)
+      if ok then
+        receipts().clear()
+      end
+    end)
   end
   return open_subcommand("resume", args)
 end
@@ -187,7 +225,11 @@ function M.continue()
         notify("no recent Codex thread found", vim.log.levels.WARN)
         return
       end
-      app.resume_thread(threads[1].id)
+      app.resume_thread(threads[1].id, function(ok)
+        if ok then
+          receipts().clear()
+        end
+      end)
     end)
   end
   return open_subcommand("resume", { "--last" })
@@ -201,7 +243,11 @@ function M.fork(args)
     return pick_thread("fork", args[1] == "--all")
   end
   if config().backend == "app_server" then
-    return require("codex.app_server").fork_thread(args[1])
+    return require("codex.app_server").fork_thread(args[1], function(ok)
+      if ok then
+        receipts().clear()
+      end
+    end)
   end
   return open_subcommand("fork", args)
 end
@@ -223,7 +269,7 @@ function M.send_range(start_line, end_line, bufnr)
     return false
   end
   local prompt, metadata = require("codex.context").range(bufnr or 0, start_line, end_line, cwd, config().context)
-  return send_context(prompt, metadata, "range")
+  return send_context(prompt, metadata, "range", cwd)
 end
 
 ---@param bufnr? integer
@@ -234,7 +280,7 @@ function M.send_visual(bufnr)
     return false
   end
   local prompt, metadata = require("codex.context").visual(bufnr or 0, cwd, config().context)
-  return send_context(prompt, metadata, "visual")
+  return send_context(prompt, metadata, "visual", cwd)
 end
 
 ---@param path? string
@@ -265,14 +311,35 @@ function M.add_paths(paths, source)
   for _, path in ipairs(relative_paths) do
     table.insert(mentions, "@" .. path)
   end
-  if not backend().send(table.concat(mentions, " ") .. " ", { submit = false }) then
-    return false
-  end
-  for _, path in ipairs(relative_paths) do
-    emit_context("file", { file_path = path })
-  end
-  emit_paths(relative_paths, source or "command")
-  return true
+  local context_source = source or "command"
+  ---@type CodexNvimFilesContextReceipt
+  local receipt = {
+    kind = "files",
+    paths = vim.deepcopy(relative_paths),
+    cwd = cwd,
+    source = context_source,
+    submitted = false,
+  }
+  local completed = false
+  return backend().send(table.concat(mentions, " ") .. " ", {
+    submit = false,
+    on_complete = function(ok)
+      if not ok or completed then
+        return
+      end
+      completed = true
+      receipts().remember(receipt, backend().status())
+      for _, path in ipairs(relative_paths) do
+        emit_context("file", {
+          file_path = path,
+          cwd = cwd,
+          source = context_source,
+          submitted = false,
+        })
+      end
+      emit_paths(relative_paths, context_source, cwd)
+    end,
+  })
 end
 
 ---@param first_line? integer
@@ -374,7 +441,23 @@ function M.prompt(text)
 end
 
 function M.status()
-  return backend().status()
+  local status = backend().status()
+  if not status.cwd then
+    status.resolved_cwd = require("codex.cwd").resolve(0, config().cwd, config().root_markers)
+  end
+  status.last_context = receipts().active(status)
+  return status
+end
+
+---@param status? CodexNvimStatus
+---@return string
+function M.status_message(status)
+  status = status or M.status()
+  return receipts().format_status(status)
+end
+
+function M._reset()
+  receipts().clear()
 end
 
 ---@param opts? CodexNvimSetupOptions

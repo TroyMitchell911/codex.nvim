@@ -1,5 +1,9 @@
 # codex.nvim
 
+<p align="center">
+  <img src="assets/codex-nvim.png" alt="codex.nvim icon" width="180">
+</p>
+
 [![CI](https://github.com/nwiizo/codex.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/nwiizo/codex.nvim/actions/workflows/ci.yml)
 
 `codex.nvim` is an unofficial, dependency-free Neovim integration for the
@@ -20,13 +24,14 @@ implementation uses Codex's public CLI and app-server interfaces.
 - Neovim 0.12-native APIs and shell-free argv execution
 - Interactive Codex terminal that survives window hiding
 - Smart focus: reveal a hidden session, jump to a visible session, or hide it
-  when already focused
+  and return to the most recent editor window when already focused
 - Configurable terminal-to-window navigation, defaulting to `Alt-h/j/k/l`
 - Working directory policies centered on the active file or project root
 - Resume, continue, fork, review, image, and interrupt workflows
 - Exact line, characterwise, linewise, and blockwise selection context
 - File/directory references from nvim-tree, neo-tree, Oil, mini.files, netrw,
   and Snacks picker lists
+- Status receipts for the last file or selection handed to the active session
 - Optional app-server backend with streamed Markdown, approval prompts, plans,
   and native diff buffers
 - `:checkhealth codex` diagnostics and `User` autocmd lifecycle events
@@ -121,6 +126,9 @@ keys = {
 | Already focused | Hide it without stopping the process |
 | Not running | Start and focus a new session |
 
+Hiding the panel from inside it restores the most recent non-Codex window when
+that window still exists.
+
 Inside the terminal, `Alt-h`, `Alt-j`, `Alt-k`, and `Alt-l` leave terminal mode
 and move to the neighboring Neovim window.
 If your terminal emulator does not send Option/Alt as Meta, configure different
@@ -148,7 +156,7 @@ keys with `terminal.window_navigation`.
 | `:CodexSendText[!] {text}` | Send and submit text; bang only inserts it |
 | `:CodexDiff` | Show the latest app-server diff in a native diff buffer |
 | `:CodexInterrupt` | Interrupt the active app-server turn |
-| `:CodexStatus` | Show backend, process, visibility, cwd, and thread status |
+| `:CodexStatus` | Show backend, process, cwd, and the last context receipt |
 | `:CodexHealth` | Run `:checkhealth codex` |
 
 Starting a separate terminal review, image, resume, or fork command does not
@@ -213,10 +221,10 @@ mappings.
 
 The default `cwd = "root"` starts Codex from the nearest directory containing a
 root marker for the file that was active when the session started. When no root
-is found, it falls back to the file's directory, then Neovim's cwd. This means
-opening `workspace_2026/tools/codex.nvim/lua/codex/init.lua` normally starts in
-the `workspace_2026` Git root; use `cwd = "file"` when the file's own directory
-should always win.
+is found, it falls back to the file's directory, then Neovim's cwd. For example,
+opening `github.com/nwiizo/codex.nvim/lua/codex/init.lua` in the standalone
+repository starts Codex from `github.com/nwiizo/codex.nvim`. Use `cwd = "file"`
+when the file's own `lua/codex` directory should always win.
 
 | Value | Resolution |
 | --- | --- |
@@ -230,10 +238,9 @@ The callback receives `bufnr`, `file`, `file_dir`, and `nvim_cwd`:
 
 ```lua
 cwd = function(ctx)
-  if ctx.file_dir and ctx.file_dir:match("/tools/codex%.nvim$") then
-    return ctx.file_dir
-  end
-  return vim.fs.root(ctx.file or ctx.nvim_cwd, { ".git" }) or ctx.nvim_cwd
+  return vim.fs.root(ctx.file or ctx.nvim_cwd, { "Makefile", ".git" })
+    or ctx.file_dir
+    or ctx.nvim_cwd
 end
 ```
 
@@ -304,8 +311,11 @@ The plugin emits these `User` autocmds. Payloads are available in `event.data`.
 | `CodexDiffUpdated` | The latest app-server turn diff changes |
 
 Terminal payloads include process/window metadata. Context payloads include
-kind, file path, and line numbers when applicable. App-server payloads include
-thread/turn identifiers and event-specific data.
+kind, file path, line numbers when applicable, cwd, and whether the context was
+inserted into the composer or submitted. `:CodexStatus` retains only this
+metadata for the active session, not the selected source text. The `source`
+field identifies the buffer, explorer, range, or visual-selection origin.
+App-server payloads include thread/turn identifiers and event-specific data.
 
 ## Design boundaries
 

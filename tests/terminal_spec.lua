@@ -213,6 +213,7 @@ h.test("focus is a smart focus and hide toggle", function()
   h.eq(terminal_win, vim.api.nvim_get_current_win())
   h.truthy(terminal.focus())
   h.eq(false, terminal.is_visible())
+  h.eq(editor_win, vim.api.nvim_get_current_win())
   h.truthy(terminal.focus())
   h.truthy(terminal.is_visible())
 
@@ -220,6 +221,61 @@ h.test("focus is a smart focus and hide toggle", function()
   h.truthy(vim.wait(1000, function()
     return not terminal.is_running()
   end, 10))
+  terminal._reset()
+end)
+
+h.test("hiding the terminal restores the most recent editor window", function()
+  terminal._reset()
+  config.setup({
+    cmd = { "sh" },
+    terminal = { auto_insert = false, auto_close = true },
+  })
+  local original_win = vim.api.nvim_get_current_win()
+  vim.cmd("vsplit")
+  local recent_editor_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_set_current_win(original_win)
+
+  h.truthy(terminal.open({ focus = false }))
+  vim.api.nvim_set_current_win(recent_editor_win)
+  h.truthy(terminal.show({ focus = true }))
+  h.truthy(terminal.hide())
+  h.eq(recent_editor_win, vim.api.nvim_get_current_win())
+
+  h.truthy(terminal.show({ focus = false }))
+  h.truthy(terminal.send("exit"))
+  h.truthy(vim.wait(1000, function()
+    return not terminal.is_running()
+  end, 10))
+  terminal._reset()
+  if vim.api.nvim_win_is_valid(recent_editor_win) then
+    vim.api.nvim_win_close(recent_editor_win, true)
+  end
+end)
+
+h.test("terminal exit restores an editor window from another tab", function()
+  terminal._reset()
+  config.setup({
+    cmd = { "sh" },
+    terminal = { auto_insert = false, auto_close = true },
+  })
+  local original_tab = vim.api.nvim_get_current_tabpage()
+  h.truthy(terminal.open({ focus = false }))
+  vim.cmd("tabnew")
+  local editor_tab = vim.api.nvim_get_current_tabpage()
+  local editor_win = vim.api.nvim_get_current_win()
+
+  h.truthy(terminal.show({ focus = true }))
+  h.truthy(terminal.send("exit"))
+  h.truthy(vim.wait(1000, function()
+    return not terminal.is_running()
+      and vim.api.nvim_get_current_tabpage() == editor_tab
+      and vim.api.nvim_get_current_win() == editor_win
+  end, 10))
+  h.eq(editor_tab, vim.api.nvim_get_current_tabpage())
+  h.eq(editor_win, vim.api.nvim_get_current_win())
+
+  vim.cmd("tabclose")
+  h.eq(original_tab, vim.api.nvim_get_current_tabpage())
   terminal._reset()
 end)
 

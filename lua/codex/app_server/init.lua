@@ -19,6 +19,9 @@ local state = {
   turn_starting = false,
   review_turn = false,
   pending_inputs = {},
+  submitting = false,
+  submission_callback = nil,
+  submission_token = 0,
 }
 
 local function notify(message, level)
@@ -36,6 +39,23 @@ end
 local function current_cwd()
   local config = require("codex.config").get()
   return require("codex.cwd").resolve(0, config.cwd, config.root_markers)
+end
+
+---@param ok boolean
+---@param token? integer
+local function finish_submission(ok, token)
+  if not state.submitting or (token and token ~= state.submission_token) then
+    return
+  end
+  local callback = state.submission_callback
+  state.submission_callback = nil
+  state.submitting = false
+  if ok then
+    state.draft = ""
+  end
+  if callback then
+    callback(ok)
+  end
 end
 
 ---@param callback fun()
@@ -118,8 +138,9 @@ local function ensure_thread(callback)
 end
 
 ---@param input table[]
+---@param callback? fun(ok: boolean)
 ---@return boolean
-local function steer_turn(input)
+local function steer_turn(input, callback)
   local requested = client.request("turn/steer", {
     threadId = state.thread_id,
     expectedTurnId = state.turn_id,
@@ -130,28 +151,56 @@ local function steer_turn(input)
       notify(message, vim.log.levels.ERROR)
       ui.append("\n\n> Error: " .. message .. "\n")
     end
+    if callback then
+      callback(err == nil)
+    end
   end)
   if not requested then
     notify("could not send turn/steer", vim.log.levels.ERROR)
+    if callback then
+      callback(false)
+    end
   end
   return requested
 end
 
+local function reject_pending_inputs()
+  local pending = state.pending_inputs
+  state.pending_inputs = {}
+  for _, item in ipairs(pending) do
+    if item.callback then
+      item.callback(false)
+    end
+  end
+end
+
+local function steer_pending_inputs()
+  local pending = state.pending_inputs
+  state.pending_inputs = {}
+  for _, item in ipairs(pending) do
+    steer_turn(item.input, item.callback)
+  end
+end
+
 ---@param input table[]
 ---@param display string
-local function start_turn(input, display)
+---@param callback? fun(ok: boolean)
+---@return boolean
+local function start_turn(input, display, callback)
   if not ui.open(require("codex.config").get().focus_after_send) then
     notify("could not open the app-server panel; turn was not sent", vim.log.levels.ERROR)
+    if callback then
+      callback(false)
+    end
     return false
   end
   ui.append("\n## You\n\n" .. display .. "\n\n## Codex\n\n")
   if state.turn_starting then
-    table.insert(state.pending_inputs, input)
+    table.insert(state.pending_inputs, { input = input, callback = callback })
     return true
   end
   if state.active and state.turn_id then
-    steer_turn(input)
-    return true
+    return steer_turn(input, callback)
   end
   state.turn_starting = true
   state.review_turn = false
@@ -165,23 +214,28 @@ local function start_turn(input, display)
   }, function(result, err)
     state.turn_starting = false
     if err or not result or not result.turn then
-      state.pending_inputs = {}
+      reject_pending_inputs()
       notify("could not start turn: " .. tostring(err and err.message or "invalid response"), vim.log.levels.ERROR)
+      if callback then
+        callback(false)
+      end
       return
     end
     state.turn_id = result.turn.id
     state.active = true
     emit("CodexTurnStarted", { thread_id = state.thread_id, turn_id = state.turn_id })
-    local pending = state.pending_inputs
-    state.pending_inputs = {}
-    for _, pending_input in ipairs(pending) do
-      steer_turn(pending_input)
+    if callback then
+      callback(true)
     end
+    steer_pending_inputs()
   end)
   if not requested then
     state.turn_starting = false
-    state.pending_inputs = {}
+    reject_pending_inputs()
     notify("could not send turn/start", vim.log.levels.ERROR)
+    if callback then
+      callback(false)
+    end
   end
   return requested
 end
@@ -263,7 +317,7 @@ function M._handle_notification(method, params)
     ui.append(table.concat(lines, "\n") .. "\n")
   elseif method == "turn/completed" then
     state.turn_starting = false
-    state.pending_inputs = {}
+    reject_pending_inputs()
     state.active = false
     state.review_turn = false
     state.turn_id = params.turn and params.turn.id or state.turn_id
@@ -587,6 +641,10 @@ function M.send(text, opts)
     notify("wait for the active review to complete before sending another prompt", vim.log.levels.WARN)
     return false
   end
+  if state.submitting then
+    notify("wait for the pending prompt to be accepted", vim.log.levels.WARN)
+    return false
+  end
   if opts.submit == false then
     if not state.cwd_locked then
       local cwd, err = current_cwd()
@@ -597,19 +655,43 @@ function M.send(text, opts)
       state.cwd = cwd
       state.cwd_locked = true
     end
+    if require("codex.config").get().focus_after_send and not ui.open(true) then
+      notify("could not open the app-server panel; draft was not inserted", vim.log.levels.ERROR)
+      return false
+    end
     state.draft = state.draft .. text
     ui.append("\n\n> Draft: " .. text .. "\n")
+    if opts.on_complete then
+      opts.on_complete(true)
+    end
     return true
   end
   local prompt = state.draft .. text
-  state.draft = ""
-  return ensure_client(function()
+  state.submitting = true
+  state.submission_token = state.submission_token + 1
+  local submission_token = state.submission_token
+  state.submission_callback = opts.on_complete
+  local delivery_result
+  local function complete(ok)
+    if not state.submitting or state.submission_token ~= submission_token then
+      return
+    end
+    delivery_result = ok
+    finish_submission(ok, submission_token)
+  end
+  local started = ensure_client(function()
     ensure_thread(function(ok)
-      if ok then
-        start_turn({ { type = "text", text = prompt } }, prompt)
+      if not ok then
+        complete(false)
+        return
       end
+      start_turn({ { type = "text", text = prompt } }, prompt, complete)
     end)
   end)
+  if not started then
+    complete(false)
+  end
+  return started and delivery_result ~= false
 end
 
 ---@param paths string[]
@@ -617,6 +699,10 @@ end
 function M.send_images(paths)
   if state.thread_switching then
     notify("wait for the thread switch to complete", vim.log.levels.WARN)
+    return false
+  end
+  if state.submitting then
+    notify("wait for the pending prompt to be accepted", vim.log.levels.WARN)
     return false
   end
   if state.review_turn then
@@ -665,7 +751,7 @@ end
 ---@param callback? fun(boolean)
 ---@return boolean
 local function switch_thread(action, thread_id, callback)
-  if state.active or state.turn_starting or state.thread_starting or state.thread_switching then
+  if state.active or state.turn_starting or state.thread_starting or state.thread_switching or state.submitting then
     notify("interrupt or wait for current app-server work before switching threads", vim.log.levels.WARN)
     if callback then
       callback(false)
@@ -731,7 +817,7 @@ end
 ---@param target table
 ---@return boolean
 function M.review(target)
-  if state.active or state.turn_starting or state.thread_starting or state.thread_switching then
+  if state.active or state.turn_starting or state.thread_starting or state.thread_switching or state.submitting then
     notify("wait for current app-server work before starting a review", vim.log.levels.WARN)
     return false
   end
@@ -757,7 +843,7 @@ function M.review(target)
       if not ok then
         state.turn_starting = false
         state.review_turn = false
-        state.pending_inputs = {}
+        reject_pending_inputs()
         return
       end
       local requested = client.request("review/start", {
@@ -767,7 +853,7 @@ function M.review(target)
       }, function(result, err)
         state.turn_starting = false
         if err or not result or not result.turn then
-          state.pending_inputs = {}
+          reject_pending_inputs()
           state.review_turn = false
           notify(
             "could not start review: " .. tostring(err and err.message or "invalid response"),
@@ -777,11 +863,7 @@ function M.review(target)
         end
         state.turn_id = result.turn.id
         state.active = true
-        local pending = state.pending_inputs
-        state.pending_inputs = {}
-        for _, pending_input in ipairs(pending) do
-          steer_turn(pending_input)
-        end
+        steer_pending_inputs()
       end)
       if not requested then
         state.turn_starting = false
@@ -793,7 +875,7 @@ function M.review(target)
   if not started then
     state.turn_starting = false
     state.review_turn = false
-    state.pending_inputs = {}
+    reject_pending_inputs()
   end
   return started
 end
@@ -822,7 +904,7 @@ function M._handle_client_exit(exit_code)
   state.active = false
   state.cwd = nil
   state.cwd_locked = false
-  state.draft = ""
+  finish_submission(false)
   state.last_diff = nil
   state.file_changes = {}
   state.delta_items = {}
@@ -831,11 +913,13 @@ function M._handle_client_exit(exit_code)
   state.thread_switching = false
   state.turn_starting = false
   state.review_turn = false
-  state.pending_inputs = {}
+  reject_pending_inputs()
 end
 
 function M.stop()
   local stopped = client.stop()
+  finish_submission(false)
+  reject_pending_inputs()
   ui.reset()
   state.thread_id = nil
   state.turn_id = nil
@@ -852,6 +936,8 @@ function M.stop()
   state.turn_starting = false
   state.review_turn = false
   state.pending_inputs = {}
+  state.submitting = false
+  state.submission_callback = nil
   return stopped
 end
 

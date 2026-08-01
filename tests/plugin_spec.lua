@@ -33,9 +33,14 @@ h.test("plugin registers commands without loading the core module", function()
     h.eq(2, vim.fn.exists(":" .. name), name .. " should exist")
   end
 
+  local notified
   local original_notify = vim.notify
-  rawset(vim, "notify", function() end)
+  rawset(vim, "notify", function(message)
+    notified = message
+  end)
   vim.cmd("CodexStatus")
   rawset(vim, "notify", original_notify)
   h.truthy(package.loaded.codex)
+  h.contains(notified, "terminal stopped")
+  h.contains(notified, "next cwd")
 end)
