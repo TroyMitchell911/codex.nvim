@@ -2,6 +2,10 @@ local h = require("tests.harness")
 local codex = require("codex")
 local config = require("codex.config")
 
+h.test("reports the release version", function()
+  h.eq("0.0.2", codex.version)
+end)
+
 h.test("add_paths sends one composer update and emits normalized context", function()
   local sent
   local original_terminal = package.loaded["codex.terminal"]
