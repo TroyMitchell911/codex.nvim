@@ -1,6 +1,6 @@
 local M = {}
 
-M.version = "0.1.0"
+M.version = "0.0.1"
 
 local function config()
   return require("codex.config").get()
