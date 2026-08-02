@@ -18,6 +18,10 @@ implementation uses Codex's public CLI and app-server interfaces.
 > [!NOTE]
 > This is a community project. It is not maintained or endorsed by OpenAI.
 
+<p align="center">
+  <img src="assets/codex-nvim-demo.png" alt="codex.nvim running OpenAI Codex beside an active Neovim buffer">
+</p>
+
 ## Features
 
 - Pure Lua with no runtime plugin dependencies
