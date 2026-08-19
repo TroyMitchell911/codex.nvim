@@ -157,6 +157,12 @@ and move to the neighboring Neovim window.
 If your terminal emulator does not send Option/Alt as Meta, configure different
 keys with `terminal.window_navigation`.
 
+Neovim sends keys typed in terminal mode to Codex, including `Esc`. Use
+`Ctrl-\` followed by `Ctrl-n` to enter Neovim's terminal Normal mode, then use
+`v`, `V`, or `Ctrl-v` to select terminal text and `i` to return to Codex. Set
+`terminal.normal_mode_keys` for a shorter buffer-local mapping. Avoid mapping
+`Esc`, because Codex uses it to cancel UI states and interrupt or backtrack.
+
 ## Commands
 
 | Command | Description |
@@ -214,6 +220,7 @@ require("codex").setup({
     auto_insert = true,
     auto_close = true,
     hide_keys = {}, -- terminal-local keys that hide Codex
+    normal_mode_keys = {}, -- terminal-local keys that enter Neovim Normal mode
     window_navigation = {
       left = "<M-h>",
       down = "<M-j>",
@@ -247,6 +254,18 @@ list sessions from the same profile.
 
 Set `terminal.window_navigation = false` to disable all four terminal-local
 mappings.
+
+For example, use `Alt-n` to enter Neovim's terminal Normal mode without taking
+`Esc` away from Codex:
+
+```lua
+terminal = {
+  normal_mode_keys = { "<M-n>" },
+}
+```
+
+The mappings are local to the Codex terminal buffer. Once in Normal mode, use
+`v`, `V`, or `Ctrl-v` for Visual mode and `i` or `a` to return to terminal mode.
 
 For a centered floating Codex TUI with terminal-local hide keys:
 

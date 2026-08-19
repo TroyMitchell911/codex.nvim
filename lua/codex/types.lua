@@ -31,6 +31,7 @@
 ---@field auto_insert? boolean
 ---@field auto_close? boolean
 ---@field hide_keys? string[]
+---@field normal_mode_keys? string[]
 ---@field window_navigation? false|CodexNvimWindowNavigation
 
 ---@class (exact) CodexNvimContextOptions
@@ -61,6 +62,7 @@
 ---@field auto_insert boolean
 ---@field auto_close boolean
 ---@field hide_keys string[]
+---@field normal_mode_keys string[]
 ---@field window_navigation false|CodexNvimWindowNavigation
 
 ---@class (exact) CodexNvimContextConfig

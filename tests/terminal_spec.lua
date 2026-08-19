@@ -463,7 +463,7 @@ h.test("queued send fails if the terminal exits before showing a composer", func
   terminal._reset()
 end)
 
-h.test("terminal installs configurable buffer-local navigation and hide keys", function()
+h.test("terminal installs configurable buffer-local navigation and action keys", function()
   terminal._reset()
   config.setup({
     cmd = { "sh" },
@@ -471,6 +471,7 @@ h.test("terminal installs configurable buffer-local navigation and hide keys", f
       auto_insert = false,
       auto_close = true,
       hide_keys = { "<F7>", "<F8>" },
+      normal_mode_keys = { "<F5>" },
       window_navigation = { left = "<F6>" },
     },
   })
@@ -478,15 +479,19 @@ h.test("terminal installs configurable buffer-local navigation and hide keys", f
   local bufnr = terminal.status().bufnr
   local mappings = vim.api.nvim_buf_get_keymap(bufnr, "t")
   local found_navigation = false
+  local normal_mode_rhs
   local hide_keys = {}
   for _, mapping in ipairs(mappings) do
     if mapping.lhs == "<F6>" and mapping.desc == "Move to left window" then
       found_navigation = true
+    elseif mapping.lhs == "<F5>" and mapping.desc == "Enter terminal Normal mode" then
+      normal_mode_rhs = mapping.rhs
     elseif mapping.desc == "Hide Codex terminal" then
       hide_keys[mapping.lhs] = true
     end
   end
   h.truthy(found_navigation)
+  h.eq("<C-\\><C-N>", normal_mode_rhs)
   h.truthy(hide_keys["<F7>"])
   h.truthy(hide_keys["<F8>"])
 

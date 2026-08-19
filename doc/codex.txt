@@ -44,6 +44,7 @@ The defaults are equivalent to: >lua
       auto_insert = true,
       auto_close = true,
       hide_keys = {},
+      normal_mode_keys = {},
       window_navigation = {
         left = "<M-h>",
         down = "<M-j>",
@@ -63,6 +64,16 @@ The defaults are equivalent to: >lua
 
 Set `terminal.window_navigation = false` to disable the terminal-local window
 movement mappings.
+
+Neovim terminal mode forwards `Esc` to Codex. Use <C-\><C-n> to enter
+terminal Normal mode, then `v`, `V`, or `Ctrl-v` to select text and `i` or `a`
+to return to terminal mode. `terminal.normal_mode_keys` installs shorter
+buffer-local mappings without taking `Esc` away from Codex: >lua
+
+  terminal = {
+    normal_mode_keys = { "<M-n>" },
+  }
+<
 
 Use `terminal.layout = "float"` for a centered floating TUI. Its size and
 border are controlled by `terminal.float`. `terminal.hide_keys` installs

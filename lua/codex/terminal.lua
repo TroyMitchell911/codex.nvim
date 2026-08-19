@@ -194,6 +194,17 @@ local function setup_window_navigation(bufnr)
 end
 
 ---@param bufnr integer
+local function setup_normal_mode_keys(bufnr)
+  for _, key in ipairs(config().terminal.normal_mode_keys) do
+    vim.keymap.set("t", key, "<C-\\><C-n>", {
+      buf = bufnr,
+      desc = "Enter terminal Normal mode",
+      silent = true,
+    })
+  end
+end
+
+---@param bufnr integer
 local function setup_hide_keys(bufnr)
   for _, key in ipairs(config().terminal.hide_keys) do
     vim.keymap.set("t", key, "<C-\\><C-n><Cmd>lua require('codex.terminal').hide()<CR>", {
@@ -420,6 +431,7 @@ local function start(opts, pending_send)
   vim.bo[bufnr].swapfile = false
   vim.b[bufnr].codex_nvim_terminal = true
   setup_window_navigation(bufnr)
+  setup_normal_mode_keys(bufnr)
   setup_hide_keys(bufnr)
   setup_float_resize(bufnr)
 

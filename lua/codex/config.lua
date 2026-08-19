@@ -20,6 +20,7 @@ local defaults = {
     auto_insert = true,
     auto_close = true,
     hide_keys = {},
+    normal_mode_keys = {},
     window_navigation = {
       left = "<M-h>",
       down = "<M-j>",
@@ -180,12 +181,14 @@ local function validate(config)
       fail("terminal." .. key, "a boolean")
     end
   end
-  local hide_keys = config.terminal.hide_keys
-  if not is_list(hide_keys) then
-    fail("terminal.hide_keys", "a list of strings")
-  end
-  for index, key in ipairs(hide_keys) do
-    validate_string(key, string.format("terminal.hide_keys[%d]", index))
+  for _, option in ipairs({ "hide_keys", "normal_mode_keys" }) do
+    local keys = config.terminal[option]
+    if not is_list(keys) then
+      fail("terminal." .. option, "a list of strings")
+    end
+    for index, key in ipairs(keys) do
+      validate_string(key, string.format("terminal.%s[%d]", option, index))
+    end
   end
   local navigation = config.terminal.window_navigation
   if navigation ~= false then

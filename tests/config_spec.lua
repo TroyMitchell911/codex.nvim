@@ -19,11 +19,12 @@ h.test("config replaces argv lists and merges nested options", function()
   h.eq("split", value.terminal.layout)
   h.eq("right", value.terminal.split_side)
   h.eq({}, value.terminal.hide_keys)
+  h.eq({}, value.terminal.normal_mode_keys)
   h.eq("root", value.cwd)
   h.eq("terminal", value.backend)
 end)
 
-h.test("config accepts a floating terminal and buffer-local hide keys", function()
+h.test("config accepts a floating terminal and buffer-local terminal keys", function()
   config._reset()
   local value = config.setup({
     terminal = {
@@ -34,6 +35,7 @@ h.test("config accepts a floating terminal and buffer-local hide keys", function
         border = "single",
       },
       hide_keys = { "<C-/>", "<C-_>" },
+      normal_mode_keys = { "<M-n>" },
     },
   })
   h.eq("float", value.terminal.layout)
@@ -41,6 +43,7 @@ h.test("config accepts a floating terminal and buffer-local hide keys", function
   h.eq(0.7, value.terminal.float.height_percentage)
   h.eq("single", value.terminal.float.border)
   h.eq({ "<C-/>", "<C-_>" }, value.terminal.hide_keys)
+  h.eq({ "<M-n>" }, value.terminal.normal_mode_keys)
 end)
 
 h.test("config accepts cwd policies and app-server backend", function()
@@ -71,6 +74,9 @@ h.test("config validates cwd and terminal navigation", function()
   end)
   h.raises("terminal.hide_keys[1]", function()
     config.setup({ terminal = { hide_keys = { "" } } })
+  end)
+  h.raises("terminal.normal_mode_keys[1]", function()
+    config.setup({ terminal = { normal_mode_keys = { "" } } })
   end)
 end)
 
