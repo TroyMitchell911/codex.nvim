@@ -23,6 +23,24 @@ local function with_failed_split(callback)
   return result
 end
 
+local function with_failed_float(callback)
+  local original_open_win = vim.api.nvim_open_win
+  local original_notify = vim.notify
+  rawset(vim.api, "nvim_open_win", function()
+    error("simulated float failure")
+  end)
+  rawset(vim, "notify", function() end)
+
+  local ok, result = pcall(callback)
+
+  rawset(vim, "notify", original_notify)
+  rawset(vim.api, "nvim_open_win", original_open_win)
+  if not ok then
+    error(result, 0)
+  end
+  return result
+end
+
 local function with_failed_buffer_attach(callback)
   local original_set_buf = vim.api.nvim_win_set_buf
   local original_notify = vim.notify
@@ -101,6 +119,23 @@ h.test("failed initial split does not leak buffer state", function()
   h.eq(
     false,
     with_failed_split(function()
+      return terminal.open({ focus = false })
+    end)
+  )
+  h.eq(nil, terminal.status().bufnr)
+  h.eq(false, terminal.is_running())
+end)
+
+h.test("failed initial float does not leak buffer state", function()
+  terminal._reset()
+  config.setup({
+    cmd = { "sh" },
+    terminal = { layout = "float", auto_insert = false },
+  })
+
+  h.eq(
+    false,
+    with_failed_float(function()
       return terminal.open({ focus = false })
     end)
   )
@@ -191,6 +226,47 @@ h.test("native terminal survives hiding and can be shown again", function()
   h.eq(false, terminal.is_visible())
   h.truthy(terminal.show({ focus = false }))
   h.truthy(terminal.is_visible())
+  h.truthy(terminal.send("exit"))
+  h.truthy(vim.wait(1000, function()
+    return not terminal.is_running()
+  end, 10))
+  terminal._reset()
+end)
+
+h.test("floating terminal is centered and survives hiding", function()
+  terminal._reset()
+  config.setup({
+    cmd = { "sh" },
+    terminal = {
+      layout = "float",
+      auto_insert = false,
+      auto_close = true,
+      float = {
+        width_percentage = 0.6,
+        height_percentage = 0.5,
+        border = "rounded",
+      },
+    },
+  })
+  local editor_win = vim.api.nvim_get_current_win()
+  h.truthy(terminal.open({ focus = false }))
+  local status = terminal.status()
+  local win_config = vim.api.nvim_win_get_config(status.winid)
+  local available_height = math.max(1, vim.o.lines - vim.o.cmdheight)
+  h.eq("editor", win_config.relative)
+  h.eq(math.min(vim.o.columns - 2, math.floor(vim.o.columns * 0.6)), win_config.width)
+  h.eq(math.min(available_height - 2, math.floor(available_height * 0.5)), win_config.height)
+  h.eq(editor_win, vim.api.nvim_get_current_win())
+
+  h.truthy(terminal.show({ focus = true }))
+  h.eq(status.winid, vim.api.nvim_get_current_win())
+  h.truthy(terminal.hide())
+  h.eq(editor_win, vim.api.nvim_get_current_win())
+  h.eq(false, terminal.is_visible())
+  h.truthy(terminal.show({ focus = false }))
+  h.eq("editor", vim.api.nvim_win_get_config(terminal.status().winid).relative)
+  vim.api.nvim_exec_autocmds("VimResized", {})
+
   h.truthy(terminal.send("exit"))
   h.truthy(vim.wait(1000, function()
     return not terminal.is_running()
@@ -298,28 +374,69 @@ h.test("focus starts a session when none is running", function()
   terminal._reset()
 end)
 
-h.test("terminal installs configurable buffer-local window navigation", function()
+h.test("terminal installs configurable buffer-local navigation and hide keys", function()
   terminal._reset()
   config.setup({
     cmd = { "sh" },
     terminal = {
       auto_insert = false,
       auto_close = true,
+      hide_keys = { "<F7>", "<F8>" },
       window_navigation = { left = "<F6>" },
     },
   })
   h.truthy(terminal.open({ focus = false }))
   local bufnr = terminal.status().bufnr
   local mappings = vim.api.nvim_buf_get_keymap(bufnr, "t")
-  local found = false
+  local found_navigation = false
+  local hide_keys = {}
   for _, mapping in ipairs(mappings) do
     if mapping.lhs == "<F6>" and mapping.desc == "Move to left window" then
-      found = true
+      found_navigation = true
+    elseif mapping.desc == "Hide Codex terminal" then
+      hide_keys[mapping.lhs] = true
+    end
+  end
+  h.truthy(found_navigation)
+  h.truthy(hide_keys["<F7>"])
+  h.truthy(hide_keys["<F8>"])
+
+  h.truthy(terminal.send("exit"))
+  h.truthy(vim.wait(1000, function()
+    return not terminal.is_running()
+  end, 10))
+  terminal._reset()
+end)
+
+h.test("terminal hide mapping restores editor focus", function()
+  terminal._reset()
+  config.setup({
+    cmd = { "sh" },
+    terminal = {
+      layout = "float",
+      auto_insert = false,
+      auto_close = true,
+      hide_keys = { "<F9>" },
+    },
+  })
+  local editor_win = vim.api.nvim_get_current_win()
+  h.truthy(terminal.open())
+  h.eq(terminal.status().winid, vim.api.nvim_get_current_win())
+
+  local rhs
+  for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(terminal.status().bufnr, "t")) do
+    if mapping.lhs == "<F9>" then
+      rhs = mapping.rhs
       break
     end
   end
-  h.truthy(found)
+  h.truthy(rhs)
+  vim.api.nvim_feedkeys(vim.keycode(rhs), "x", false)
+  h.truthy(vim.wait(1000, function()
+    return not terminal.is_visible() and vim.api.nvim_get_current_win() == editor_win
+  end, 10))
 
+  h.truthy(terminal.show({ focus = false }))
   h.truthy(terminal.send("exit"))
   h.truthy(vim.wait(1000, function()
     return not terminal.is_running()

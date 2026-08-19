@@ -9,10 +9,17 @@ local defaults = {
   root_markers = { ".git" },
   focus_after_send = false,
   terminal = {
+    layout = "split",
     split_side = "right",
     split_width_percentage = 0.35,
+    float = {
+      width_percentage = 0.85,
+      height_percentage = 0.85,
+      border = "rounded",
+    },
     auto_insert = true,
     auto_close = true,
+    hide_keys = {},
     window_navigation = {
       left = "<M-h>",
       down = "<M-j>",
@@ -135,6 +142,9 @@ local function validate(config)
   if type(config.terminal) ~= "table" then
     fail("terminal", "a table")
   end
+  if config.terminal.layout ~= "split" and config.terminal.layout ~= "float" then
+    fail("terminal.layout", '"split" or "float"')
+  end
   if config.terminal.split_side ~= "left" and config.terminal.split_side ~= "right" then
     fail("terminal.split_side", '"left" or "right"')
   end
@@ -145,10 +155,37 @@ local function validate(config)
   then
     fail("terminal.split_width_percentage", "a number greater than 0 and at most 1")
   end
+  if type(config.terminal.float) ~= "table" then
+    fail("terminal.float", "a table")
+  end
+  for _, key in ipairs({ "width_percentage", "height_percentage" }) do
+    local value = config.terminal.float[key]
+    if type(value) ~= "number" or value <= 0 or value > 1 then
+      fail("terminal.float." .. key, "a number greater than 0 and at most 1")
+    end
+  end
+  local border = config.terminal.float.border
+  if
+    border ~= "none"
+    and border ~= "single"
+    and border ~= "double"
+    and border ~= "rounded"
+    and border ~= "solid"
+    and border ~= "shadow"
+  then
+    fail("terminal.float.border", '"none", "single", "double", "rounded", "solid", or "shadow"')
+  end
   for _, key in ipairs({ "auto_insert", "auto_close" }) do
     if type(config.terminal[key]) ~= "boolean" then
       fail("terminal." .. key, "a boolean")
     end
+  end
+  local hide_keys = config.terminal.hide_keys
+  if not is_list(hide_keys) then
+    fail("terminal.hide_keys", "a list of strings")
+  end
+  for index, key in ipairs(hide_keys) do
+    validate_string(key, string.format("terminal.hide_keys[%d]", index))
   end
   local navigation = config.terminal.window_navigation
   if navigation ~= false then

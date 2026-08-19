@@ -198,10 +198,17 @@ require("codex").setup({
   focus_after_send = false, -- applies to both backends
 
   terminal = {
+    layout = "split", -- "split" or "float"
     split_side = "right",
     split_width_percentage = 0.35,
+    float = {
+      width_percentage = 0.85,
+      height_percentage = 0.85,
+      border = "rounded",
+    },
     auto_insert = true,
     auto_close = true,
+    hide_keys = {}, -- terminal-local keys that hide Codex
     window_navigation = {
       left = "<M-h>",
       down = "<M-j>",
@@ -235,6 +242,24 @@ list sessions from the same profile.
 
 Set `terminal.window_navigation = false` to disable all four terminal-local
 mappings.
+
+For a centered floating Codex TUI with terminal-local hide keys:
+
+```lua
+terminal = {
+  layout = "float",
+  float = {
+    width_percentage = 0.85,
+    height_percentage = 0.85,
+    border = "rounded",
+  },
+  hide_keys = { "<C-/>", "<C-_>" },
+}
+```
+
+The hide mappings are buffer-local, so the same keys keep their existing
+behavior in editor and other terminal buffers. `<C-/>` and `<C-_>` cover the
+two encodings commonly produced for Ctrl-/ by terminals and multiplexers.
 
 ### Working directory policy
 
@@ -272,10 +297,10 @@ restarting from a different file or root.
 
 The terminal backend runs the complete interactive Codex TUI. It is the
 recommended default because Codex owns the conversation UI and approval flow.
-Closing the split only hides its buffer; `:CodexStop` stops the process.
-The split side and width under `terminal` are also reused by the app-server
-panel. Argument-free resume/fork pickers depend on app-server; pass a session ID
-to run those terminal commands without the picker protocol.
+Closing its split or float only hides the buffer; `:CodexStop` stops the
+process. The split side and width under `terminal` are also reused by the
+app-server panel. Argument-free resume/fork pickers depend on app-server; pass a
+session ID to run those terminal commands without the picker protocol.
 
 ### App-server (experimental)
 

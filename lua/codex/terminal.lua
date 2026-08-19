@@ -10,6 +10,7 @@ local window = require("codex.window")
 ---@field argv? string[]
 ---@field close_on_exit? boolean
 ---@field return_winid? integer
+---@field resize_group? integer
 
 ---@type CodexNvimTerminalState
 local state = {
@@ -20,6 +21,7 @@ local state = {
   argv = nil,
   close_on_exit = nil,
   return_winid = nil,
+  resize_group = nil,
 }
 
 ---@return CodexNvimConfig
@@ -67,9 +69,37 @@ local function find_window()
   return nil
 end
 
+---@param winid integer
+local function configure_window(winid)
+  vim.wo[winid].number = false
+  vim.wo[winid].relativenumber = false
+  vim.wo[winid].signcolumn = "no"
+end
+
+---@return table
+local function float_window_config()
+  local terminal_config = config().terminal
+  local available_width = math.max(1, vim.o.columns)
+  local available_height = math.max(1, vim.o.lines - vim.o.cmdheight)
+  local max_width = math.max(1, available_width - 2)
+  local max_height = math.max(1, available_height - 2)
+  local width = math.min(max_width, math.max(1, math.floor(available_width * terminal_config.float.width_percentage)))
+  local height =
+    math.min(max_height, math.max(1, math.floor(available_height * terminal_config.float.height_percentage)))
+  return {
+    relative = "editor",
+    row = math.max(0, math.floor((available_height - height) / 2)),
+    col = math.max(0, math.floor((available_width - width) / 2)),
+    width = width,
+    height = height,
+    style = "minimal",
+    border = terminal_config.float.border,
+  }
+end
+
 ---@param bufnr integer
 ---@return integer
-local function open_split(bufnr)
+local function open_window(bufnr)
   local terminal_config = config().terminal
   local width = math.max(1, math.floor(vim.o.columns * terminal_config.split_width_percentage))
   local modifier = terminal_config.split_side == "left" and "topleft" or "botright"
@@ -80,12 +110,15 @@ local function open_split(bufnr)
   end
 
   local ok, winid_or_error = pcall(function()
-    vim.cmd(string.format("%s %dvsplit", modifier, width))
-    local winid = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(winid, bufnr)
-    vim.wo[winid].number = false
-    vim.wo[winid].relativenumber = false
-    vim.wo[winid].signcolumn = "no"
+    local winid
+    if terminal_config.layout == "float" then
+      winid = vim.api.nvim_open_win(bufnr, true, float_window_config())
+    else
+      vim.cmd(string.format("%s %dvsplit", modifier, width))
+      winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(winid, bufnr)
+    end
+    configure_window(winid)
     return winid
   end)
   if not ok then
@@ -105,8 +138,8 @@ end
 ---@param bufnr integer
 ---@return integer? winid
 ---@return unknown? error
-local function try_open_split(bufnr)
-  local ok, winid_or_error = pcall(open_split, bufnr)
+local function try_open_window(bufnr)
+  local ok, winid_or_error = pcall(open_window, bufnr)
   if not ok then
     return nil, winid_or_error
   end
@@ -142,7 +175,46 @@ local function setup_window_navigation(bufnr)
   end
 end
 
+---@param bufnr integer
+local function setup_hide_keys(bufnr)
+  for _, key in ipairs(config().terminal.hide_keys) do
+    vim.keymap.set("t", key, "<C-\\><C-n><Cmd>lua require('codex.terminal').hide()<CR>", {
+      buf = bufnr,
+      desc = "Hide Codex terminal",
+      silent = true,
+    })
+  end
+end
+
+---@param bufnr integer
+local function setup_float_resize(bufnr)
+  if config().terminal.layout ~= "float" then
+    return
+  end
+  local group = vim.api.nvim_create_augroup("codex_nvim_terminal_resize", { clear = true })
+  state.resize_group = group
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = group,
+    callback = function()
+      if state.bufnr ~= bufnr or not valid_buffer() then
+        return
+      end
+      local winid = find_window()
+      if not winid or config().terminal.layout ~= "float" then
+        return
+      end
+      local win_config = vim.api.nvim_win_get_config(winid)
+      if win_config.relative ~= "" then
+        pcall(vim.api.nvim_win_set_config, winid, float_window_config())
+      end
+    end,
+  })
+end
+
 local function clear_state()
+  if state.resize_group then
+    pcall(vim.api.nvim_del_augroup_by_id, state.resize_group)
+  end
   state.bufnr = nil
   state.winid = nil
   state.jobid = nil
@@ -150,6 +222,7 @@ local function clear_state()
   state.argv = nil
   state.close_on_exit = nil
   state.return_winid = nil
+  state.resize_group = nil
 end
 
 ---@param bufnr integer
@@ -223,10 +296,10 @@ function M.show(opts)
   local reopened = winid == nil
   if not winid then
     local original_win = vim.api.nvim_get_current_win()
-    local split_error
-    winid, split_error = try_open_split(state.bufnr)
+    local window_error
+    winid, window_error = try_open_window(state.bufnr)
     if not winid then
-      notify("could not open terminal split: " .. tostring(split_error), vim.log.levels.ERROR)
+      notify("could not open terminal window: " .. tostring(window_error), vim.log.levels.ERROR)
       return false
     end
     state.winid = winid
@@ -261,17 +334,19 @@ function M.open(opts)
   local source_bufnr = vim.api.nvim_win_get_buf(original_win)
   local bufnr = vim.api.nvim_create_buf(false, true)
   state.bufnr = bufnr
-  local split_error
-  state.winid, split_error = try_open_split(bufnr)
+  local window_error
+  state.winid, window_error = try_open_window(bufnr)
   if not state.winid then
     cleanup_failed_start(bufnr)
-    notify("could not open terminal split: " .. tostring(split_error), vim.log.levels.ERROR)
+    notify("could not open terminal window: " .. tostring(window_error), vim.log.levels.ERROR)
     return false
   end
   vim.bo[bufnr].bufhidden = "hide"
   vim.bo[bufnr].swapfile = false
   vim.b[bufnr].codex_nvim_terminal = true
   setup_window_navigation(bufnr)
+  setup_hide_keys(bufnr)
+  setup_float_resize(bufnr)
 
   local argv = opts.argv or M._build_argv(opts.subcommand, opts.args)
   local working_directory, cwd_error
