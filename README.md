@@ -144,6 +144,11 @@ keys = {
 | Already focused | Hide it without stopping the process |
 | Not running | Start and focus a new session |
 
+Prompt and context commands also start the selected backend when it is not
+running. Terminal input stays queued until Codex exposes its composer, so an
+upgrade or onboarding screen cannot consume it. Cold starts honor
+`focus_after_send` while the session starts.
+
 Hiding the panel from inside it restores the most recent non-Codex window when
 that window still exists.
 

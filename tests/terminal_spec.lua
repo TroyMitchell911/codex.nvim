@@ -126,6 +126,30 @@ h.test("failed initial split does not leak buffer state", function()
   h.eq(false, terminal.is_running())
 end)
 
+h.test("failed send auto-start does not leak buffer state", function()
+  terminal._reset()
+  config.setup({
+    cmd = { "sh" },
+    terminal = { auto_insert = false },
+  })
+  local completed
+
+  h.eq(
+    false,
+    with_failed_split(function()
+      return terminal.send("draft", {
+        submit = false,
+        on_complete = function(ok)
+          completed = ok
+        end,
+      })
+    end)
+  )
+  h.eq(false, completed)
+  h.eq(nil, terminal.status().bufnr)
+  h.eq(false, terminal.is_running())
+end)
+
 h.test("failed initial float does not leak buffer state", function()
   terminal._reset()
   config.setup({
@@ -371,6 +395,71 @@ h.test("focus starts a session when none is running", function()
   h.truthy(vim.wait(1000, function()
     return not terminal.is_running()
   end, 10))
+  terminal._reset()
+end)
+
+h.test("send waits for the composer after starting a session", function()
+  terminal._reset()
+  config.setup({
+    cmd = {
+      "sh",
+      "-c",
+      "printf 'startup screen\\n'; sleep 0.1; printf '\\033[0 '; sleep 0.05; printf 'q\\033[?25h'; exec sh",
+    },
+    focus_after_send = false,
+    terminal = { auto_insert = false, auto_close = true },
+  })
+  local editor_win = vim.api.nvim_get_current_win()
+  local completed = {}
+
+  h.truthy(terminal.send("draft", {
+    submit = false,
+    on_complete = function(ok)
+      table.insert(completed, ok)
+    end,
+  }))
+  h.truthy(terminal.send("-queued", {
+    submit = false,
+    on_complete = function(ok)
+      table.insert(completed, ok)
+    end,
+  }))
+  local status = terminal.status()
+  h.truthy(status.running)
+  h.truthy(status.visible)
+  h.eq(editor_win, vim.api.nvim_get_current_win())
+  h.eq({}, completed)
+  h.eq(nil, table.concat(vim.api.nvim_buf_get_lines(status.bufnr, 0, -1, false), "\n"):find("draft", 1, true))
+  h.truthy(vim.wait(1000, function()
+    local lines = vim.api.nvim_buf_get_lines(status.bufnr, 0, -1, false)
+    return table.concat(lines, "\n"):find("draft-queued", 1, true) ~= nil
+  end, 10))
+  h.eq({ true, true }, completed)
+
+  terminal._reset()
+end)
+
+h.test("queued send fails if the terminal exits before showing a composer", function()
+  terminal._reset()
+  config.setup({
+    cmd = { "sh", "-c", "sleep 0.05; exit 7" },
+    focus_after_send = false,
+    terminal = { auto_insert = false, auto_close = true },
+  })
+  local completed
+
+  h.truthy(terminal.send("draft", {
+    submit = false,
+    on_complete = function(ok)
+      completed = ok
+    end,
+  }))
+  h.truthy(vim.wait(1000, function()
+    return completed ~= nil
+  end, 10))
+  h.eq(false, completed)
+  h.eq(false, terminal.is_running())
+
   terminal._reset()
 end)
 

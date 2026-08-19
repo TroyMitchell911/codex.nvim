@@ -92,6 +92,11 @@ These keys retain their existing behavior outside the Codex terminal buffer.
 :CodexFocus            Start, reveal, or focus Codex. Hide it when it already
                        has focus.
 
+Prompt and context commands start the selected backend when it is not running.
+Terminal input stays queued until Codex exposes its composer, so startup
+screens cannot consume it. Cold starts honor `focus_after_send` while the
+session starts.
+
                                                         *:CodexStop*
 :CodexStop             Stop the managed Codex process.
 

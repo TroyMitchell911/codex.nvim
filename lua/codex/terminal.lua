@@ -2,6 +2,13 @@ local M = {}
 
 local window = require("codex.window")
 
+local composer_cursor_pattern = "\27%[[0-9; ]+ q\27%[%?25h"
+local output_tail_length = 32
+
+---@class (exact) CodexNvimPendingSend
+---@field text string
+---@field opts CodexNvimSendOptions
+
 ---@class (exact) CodexNvimTerminalState
 ---@field bufnr? integer
 ---@field winid? integer
@@ -11,6 +18,10 @@ local window = require("codex.window")
 ---@field close_on_exit? boolean
 ---@field return_winid? integer
 ---@field resize_group? integer
+---@field pending_sends CodexNvimPendingSend[]
+---@field waiting_for_composer boolean
+---@field delivery_scheduled boolean
+---@field output_tail string
 
 ---@type CodexNvimTerminalState
 local state = {
@@ -22,7 +33,14 @@ local state = {
   close_on_exit = nil,
   return_winid = nil,
   resize_group = nil,
+  pending_sends = {},
+  waiting_for_composer = false,
+  delivery_scheduled = false,
+  output_tail = "",
 }
+
+---@type fun(text: string, opts: CodexNvimSendOptions): boolean
+local send_now
 
 ---@return CodexNvimConfig
 local function config()
@@ -211,7 +229,53 @@ local function setup_float_resize(bufnr)
   })
 end
 
+---@param opts CodexNvimSendOptions
+---@param ok boolean
+local function complete_send(opts, ok)
+  if opts.on_complete then
+    pcall(opts.on_complete, ok)
+  end
+end
+
+---@param data string[]
+---@return boolean
+local function output_has_composer_cursor(data)
+  local output = state.output_tail .. table.concat(data or {}, "\n")
+  state.output_tail = output:sub(math.max(1, #output - output_tail_length + 1))
+  -- Codex sets the cursor style and shows it only after rendering an editable
+  -- composer. Startup selectors keep the terminal cursor hidden.
+  return output:find(composer_cursor_pattern) ~= nil
+end
+
+---@param output_jobid integer
+---@param data string[]
+local function handle_output(output_jobid, data)
+  if not state.waiting_for_composer or (state.jobid and state.jobid ~= output_jobid) then
+    return
+  end
+  if not output_has_composer_cursor(data) then
+    return
+  end
+
+  state.waiting_for_composer = false
+  state.delivery_scheduled = true
+  vim.schedule(function()
+    if state.jobid ~= output_jobid or not M.is_running() then
+      return
+    end
+    local pending_sends = state.pending_sends
+    state.pending_sends = {}
+    state.delivery_scheduled = false
+    for _, pending in ipairs(pending_sends) do
+      if not send_now(pending.text, pending.opts) then
+        complete_send(pending.opts, false)
+      end
+    end
+  end)
+end
+
 local function clear_state()
+  local pending_sends = state.pending_sends
   if state.resize_group then
     pcall(vim.api.nvim_del_augroup_by_id, state.resize_group)
   end
@@ -223,6 +287,13 @@ local function clear_state()
   state.close_on_exit = nil
   state.return_winid = nil
   state.resize_group = nil
+  state.pending_sends = {}
+  state.waiting_for_composer = false
+  state.delivery_scheduled = false
+  state.output_tail = ""
+  for _, pending in ipairs(pending_sends) do
+    complete_send(pending.opts, false)
+  end
 end
 
 ---@param bufnr integer
@@ -316,10 +387,10 @@ function M.show(opts)
   return true
 end
 
----@param opts? CodexNvimOpenOptions
+---@param opts CodexNvimOpenOptions
+---@param pending_send? CodexNvimPendingSend
 ---@return boolean
-function M.open(opts)
-  opts = opts or {}
+local function start(opts, pending_send)
   if M.is_running() then
     return M.show({ focus = opts.focus })
   end
@@ -334,6 +405,10 @@ function M.open(opts)
   local source_bufnr = vim.api.nvim_win_get_buf(original_win)
   local bufnr = vim.api.nvim_create_buf(false, true)
   state.bufnr = bufnr
+  state.pending_sends = pending_send and { pending_send } or {}
+  state.waiting_for_composer = pending_send ~= nil
+  state.delivery_scheduled = false
+  state.output_tail = ""
   local window_error
   state.winid, window_error = try_open_window(bufnr)
   if not state.winid then
@@ -371,6 +446,9 @@ function M.open(opts)
     on_exit = function(_, exit_code)
       handle_exit(jobid, exit_code)
     end,
+    on_stdout = function(output_jobid, data)
+      handle_output(output_jobid, data)
+    end,
   }
   if next(config().env) ~= nil then
     job_options.env = config().env
@@ -393,6 +471,12 @@ function M.open(opts)
   end
   emit("CodexStarted", M.status())
   return true
+end
+
+---@param opts? CodexNvimOpenOptions
+---@return boolean
+function M.open(opts)
+  return start(opts or {})
 end
 
 ---@return boolean
@@ -459,18 +543,9 @@ function M._encode(text)
 end
 
 ---@param text string
----@param opts? CodexNvimSendOptions
+---@param opts CodexNvimSendOptions
 ---@return boolean
-function M.send(text, opts)
-  opts = opts or {}
-  if type(text) ~= "string" or text == "" then
-    notify("cannot send empty text", vim.log.levels.WARN)
-    return false
-  end
-  if not M.is_running() then
-    notify("start Codex before sending context", vim.log.levels.WARN)
-    return false
-  end
+send_now = function(text, opts)
   local channel = valid_buffer() and vim.b[state.bufnr].terminal_job_id or nil
   if not channel or channel == 0 then
     channel = valid_buffer() and vim.bo[state.bufnr].channel or state.jobid
@@ -487,10 +562,27 @@ function M.send(text, opts)
   if config().focus_after_send then
     M.show({ focus = true })
   end
-  if opts.on_complete then
-    opts.on_complete(true)
-  end
+  complete_send(opts, true)
   return true
+end
+
+---@param text string
+---@param opts? CodexNvimSendOptions
+---@return boolean
+function M.send(text, opts)
+  opts = opts or {}
+  if type(text) ~= "string" or text == "" then
+    notify("cannot send empty text", vim.log.levels.WARN)
+    return false
+  end
+  if not M.is_running() then
+    return start({ focus = config().focus_after_send }, { text = text, opts = opts })
+  end
+  if state.waiting_for_composer or state.delivery_scheduled then
+    table.insert(state.pending_sends, { text = text, opts = opts })
+    return true
+  end
+  return send_now(text, opts)
 end
 
 ---@return CodexNvimStatus
