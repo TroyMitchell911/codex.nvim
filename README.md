@@ -65,6 +65,7 @@ With lazy.nvim:
     "CodexPrompt",
     "CodexSend",
     "CodexSendVisual",
+    "CodexAddVisual",
     "CodexAdd",
     "CodexTreeAdd",
     "CodexDiff",
@@ -94,6 +95,13 @@ Add the current file to the composer without submitting:
 :CodexAdd
 ```
 
+Insert an exact visual selection without submitting, then finish the prompt
+inside Codex:
+
+```vim
+:'<,'>CodexAddVisual
+```
+
 Send an exact visual selection:
 
 ```vim
@@ -113,8 +121,14 @@ keys = {
   { "<leader>ax", "<cmd>CodexFocus<cr>", desc = "Focus or hide Codex" },
   { "<leader>ab", "<cmd>CodexAdd<cr>", desc = "Add current buffer to Codex" },
   {
+    "<leader>aa",
+    ":<C-U>CodexAddVisual<CR>",
+    mode = "v",
+    desc = "Add selection to Codex prompt",
+  },
+  {
     "<leader>as",
-    "<cmd>CodexSendVisual<cr>",
+    ":<C-U>CodexSendVisual<CR>",
     mode = "v",
     desc = "Send selection to Codex",
   },
@@ -155,6 +169,7 @@ keys with `terminal.window_navigation`.
 | `:CodexPrompt [text]` | Prompt Codex, using `vim.ui.input` when text is omitted |
 | `:[range]CodexSend` | Send complete lines with file and range context |
 | `:'<,'>CodexSendVisual` | Send the exact visual selection |
+| `:'<,'>CodexAddVisual` | Insert the exact visual selection without submitting |
 | `:CodexAdd [path]` | Insert an `@path` reference without submitting |
 | `:[range]CodexTreeAdd` | Insert selected explorer paths without submitting |
 | `:CodexSendText[!] {text}` | Send and submit text; bang only inserts it |

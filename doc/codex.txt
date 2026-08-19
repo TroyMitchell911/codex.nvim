@@ -108,6 +108,11 @@ movement mappings.
                                                         *:CodexSendVisual*
 :'<,'>CodexSendVisual  Send an exact character, line, or block selection.
 
+                                                        *:CodexAddVisual*
+:'<,'>CodexAddVisual   Insert an exact character, line, or block selection
+                       without submitting, so the prompt can be completed in
+                       Codex first.
+
                                                         *:CodexAdd*
 :CodexAdd [path]       Insert an @path reference without submitting.
 
