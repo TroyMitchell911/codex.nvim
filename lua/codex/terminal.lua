@@ -3,7 +3,9 @@ local M = {}
 local window = require("codex.window")
 
 local composer_cursor_pattern = "\27%[[0-9; ]+ q\27%[%?25h"
+-- Keep enough overlap to match the cursor sequence across stdout chunks.
 local output_tail_length = 32
+local composer_wait_warning_ms = 5000
 
 ---@class (exact) CodexNvimPendingSend
 ---@field text string
@@ -19,6 +21,7 @@ local output_tail_length = 32
 ---@field return_winid? integer
 ---@field resize_group? integer
 ---@field pending_sends CodexNvimPendingSend[]
+---@field composer_ready boolean
 ---@field waiting_for_composer boolean
 ---@field delivery_scheduled boolean
 ---@field output_tail string
@@ -34,6 +37,7 @@ local state = {
   return_winid = nil,
   resize_group = nil,
   pending_sends = {},
+  composer_ready = false,
   waiting_for_composer = false,
   delivery_scheduled = false,
   output_tail = "",
@@ -258,16 +262,32 @@ local function output_has_composer_cursor(data)
   return output:find(composer_cursor_pattern) ~= nil
 end
 
+---@param jobid integer
+local function schedule_composer_wait_warning(jobid)
+  vim.defer_fn(function()
+    if state.jobid == jobid and state.waiting_for_composer and #state.pending_sends > 0 then
+      notify(
+        "terminal input is still queued; finish any Codex startup prompt to make the composer ready",
+        vim.log.levels.WARN
+      )
+    end
+  end, composer_wait_warning_ms)
+end
+
 ---@param output_jobid integer
 ---@param data string[]
 local function handle_output(output_jobid, data)
-  if not state.waiting_for_composer or (state.jobid and state.jobid ~= output_jobid) then
+  if state.jobid and state.jobid ~= output_jobid then
     return
   end
-  if not output_has_composer_cursor(data) then
+  if state.composer_ready or not output_has_composer_cursor(data) then
     return
   end
 
+  state.composer_ready = true
+  if not state.waiting_for_composer then
+    return
+  end
   state.waiting_for_composer = false
   state.delivery_scheduled = true
   vim.schedule(function()
@@ -299,6 +319,7 @@ local function clear_state()
   state.return_winid = nil
   state.resize_group = nil
   state.pending_sends = {}
+  state.composer_ready = false
   state.waiting_for_composer = false
   state.delivery_scheduled = false
   state.output_tail = ""
@@ -329,6 +350,9 @@ local function handle_exit(exited_jobid, exit_code)
     local close_on_exit = state.close_on_exit ~= false
     local return_winid = state.return_winid
     local restore_focus = exited_bufnr ~= nil and vim.api.nvim_win_get_buf(0) == exited_bufnr
+    if #state.pending_sends > 0 then
+      notify("queued terminal input was not delivered before Codex exited", vim.log.levels.WARN)
+    end
     clear_state()
     if close_on_exit and config().terminal.auto_close and exited_bufnr and vim.api.nvim_buf_is_valid(exited_bufnr) then
       window.hide_buffer_windows(exited_bufnr)
@@ -417,6 +441,7 @@ local function start(opts, pending_send)
   local bufnr = vim.api.nvim_create_buf(false, true)
   state.bufnr = bufnr
   state.pending_sends = pending_send and { pending_send } or {}
+  state.composer_ready = false
   state.waiting_for_composer = pending_send ~= nil
   state.delivery_scheduled = false
   state.output_tail = ""
@@ -476,6 +501,9 @@ local function start(opts, pending_send)
   jobid = job_or_error
 
   state.jobid = jobid
+  if state.waiting_for_composer then
+    schedule_composer_wait_warning(jobid)
+  end
   if opts.focus == false and vim.api.nvim_win_is_valid(original_win) then
     vim.api.nvim_set_current_win(original_win)
   else
@@ -590,8 +618,15 @@ function M.send(text, opts)
   if not M.is_running() then
     return start({ focus = config().focus_after_send }, { text = text, opts = opts })
   end
-  if state.waiting_for_composer or state.delivery_scheduled then
+  if not state.composer_ready or state.delivery_scheduled then
+    local started_waiting = not state.composer_ready and not state.waiting_for_composer
+    if not state.composer_ready then
+      state.waiting_for_composer = true
+    end
     table.insert(state.pending_sends, { text = text, opts = opts })
+    if started_waiting then
+      schedule_composer_wait_warning(state.jobid)
+    end
     return true
   end
   return send_now(text, opts)
